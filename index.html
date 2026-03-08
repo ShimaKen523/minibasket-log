@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>minibasket-log</title>
+<link rel="manifest" href="/manifest.json"/>
+<meta name="theme-color" content="#0f2744"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="minibasket-log"/>
+<link rel="apple-touch-icon" href="/icon-192.png"/>
+<script>
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/service-worker.js');
+    });
+  }
+</script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Hiragino Sans','Noto Sans JP',sans-serif;background:#f1f5f9;min-height:100vh;}
+  #root{max-width:430px;margin:0 auto;}
+  input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script type="module">
+
+// ── Config ──────────────────────────────────────────────────────────
+const SUPABASE_URL     = 'https://bydxbcykaazwlhogrfae.supabase.co';
+const SUPABASE_ANON_KEY= 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ5ZHhiY3lrYWF6d2xob2dyZmFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5ODg2MzQsImV4cCI6MjA4ODU2NDYzNH0.vSf8SImFQU47bIG-8BixK4jdWhR7tp0h4TRMCeyanAA';
+
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ── Helpers ──────────────────────────────────────────────────────────
+const fiscalYear = s => { const d=new Date(s); return d.getMonth()>=3?d.getFullYear():d.getFullYear()-1; };
+const res = g => g.our_score>g.their_score?"win":g.our_score<g.their_score?"lose":"draw";
+const RB  = {win:{t:"勝",bg:"#d1fae5",c:"#059669"},lose:{t:"敗",bg:"#fee2e2",c:"#dc2626"},draw:{t:"分",bg:"#fef9c3",c:"#d97706"}};
+const fmtD = s => { const d=new Date(s); return `${String(d.getFullYear()).slice(2)}/${d.getMonth()+1}/${d.getDate()}`; };
+const escScore = d => d==="round"?1:0.5;
+const GRADES  = ["U-12","U-11","U-10"];
+const GENDERS = ["男子","女子"];
+function today(){ return new Date().toISOString().split("T")[0]; }
+
+// ── State ────────────────────────────────────────────────────────────
+let user         = null;
+let currentTeam  = null; // {id, name, invite_token, role}
+let myTeams      = [];   // [{id,name,invite_token,role}]
+let tournaments  = [];
+let players      = [];
+let view         = "loading";
+// team screens
+let newTeamName  = "";
+let newTeamError = "";
+let joinTeamError= "";
+// existing app state
+let isAdmin      = false;
+let filterYr     = null;
+let filterGr     = null;
+let filterGen    = null;
+let search       = "";
+let sel          = null;
+let tf = {name:"",grade:"U-12",gender:"男子",date:today(),venue:"",escorts:[{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"}]};
+let gf = {opponent:"",ourScore:"",theirScore:"",memo:""};
+let te="", ge="";
+let editGameId = null;
+let analTab = "opp";
+let analMonthSel = null;
+let analVenueSel = null;
+let analEscSel   = null;
+let players_tab  = "list"; // list | add | edit
+let pf = {name:"",furigana:"",joinOrder:"",enrollYear:String(new Date().getFullYear()),gender:"男子"};
+let pe = "";
+let editPlayerId = null;
+let selGame = null;
+let sf = {};
+// invite handling
+let pendingInviteToken = null;
+let pendingTeamInfo    = null; // {id,name} for confirm UI
+
+// ── Supabase realtime ────────────────────────────────────────────────
+let realtimeSubs = [];
+function stopListeners(){
+  realtimeSubs.forEach(s=>sb.removeChannel(s));
+  realtimeSubs=[];
+}
+async function startListeners(){
+  stopListeners();
+  if(!currentTeam) return;
+  await loadTournaments();
+  await loadPlayers();
+
+  const ch1 = sb.channel('tournaments-'+currentTeam.id)
+    .on('postgres_changes',{event:'*',schema:'public',table:'tournaments',filter:`team_id=eq.${currentTeam.id}`},()=>loadTournaments())
+    .on('postgres_changes',{event:'*',schema:'public',table:'games'},()=>loadTournaments())
+    .on('postgres_changes',{event:'*',schema:'public',table:'escorts'},()=>loadTournaments())
+    .on('postgres_changes',{event:'*',schema:'public',table:'game_stats'},()=>loadTournaments())
+    .subscribe();
+  const ch2 = sb.channel('players-'+currentTeam.id)
+    .on('postgres_changes',{event:'*',schema:'public',table:'players',filter:`team_id=eq.${currentTeam.id}`},()=>loadPlayers())
+    .subscribe();
+  realtimeSubs=[ch1,ch2];
+}
+
+async function loadTournaments(){
+  const {data:ts} = await sb.from('tournaments')
+    .select(`*, escorts(*), games(*, game_stats(*))`)
+    .eq('team_id', currentTeam.id)
+    .order('date', {ascending:false});
+  if(!ts) return;
+  // normalize
+  tournaments = ts.map(t=>({
+    ...t,
+    escorts: t.escorts||[],
+    games: (t.games||[]).map(g=>({...g, stats: g.game_stats||[]}))
+      .sort((a,b)=>new Date(a.created_at)-new Date(b.created_at))
+  }));
+  if(filterYr===null && tournaments.length>0){
+    const years=[...new Set(tournaments.map(t=>fiscalYear(t.date)))].sort((a,b)=>b-a);
+    filterYr=years[0];
+  }
+  render();
+}
+
+async function loadPlayers(){
+  const {data} = await sb.from('players')
+    .select('*')
+    .eq('team_id', currentTeam.id)
+    .order('enroll_year',{ascending:true});
+  players = data||[];
+  render();
+}
+
+// ── Auth ─────────────────────────────────────────────────────────────
+sb.auth.onAuthStateChange(async (event, session) => {
+  user = session?.user ?? null;
+  if(user){
+    // 招待トークンが pending なら先に処理
+    const invToken = sessionStorage.getItem('invite_token');
+    if(invToken){ pendingInviteToken=invToken; sessionStorage.removeItem('invite_token'); }
+    await loadMyTeams();
+    if(pendingInviteToken){
+      await handleInviteToken(pendingInviteToken);
+      return;
+    }
+    if(myTeams.length===0){ view="team_select"; render(); }
+    else if(myTeams.length===1){ await selectTeam(myTeams[0]); }
+    else { view="team_select"; render(); }
+  } else {
+    stopListeners();
+    tournaments=[]; players=[]; currentTeam=null; myTeams=[];
+    view="login"; render();
+  }
+});
+
+async function loadMyTeams(){
+  const {data} = await sb.from('team_members')
+    .select('team_id, role, teams(id,name,invite_token)')
+    .eq('user_id', user.id);
+  myTeams = (data||[]).map(m=>({
+    id: m.teams.id,
+    name: m.teams.name,
+    invite_token: m.teams.invite_token,
+    role: m.role
+  }));
+}
+
+async function selectTeam(team){
+  currentTeam = team;
+  isAdmin = team.role === 'admin';
+  view = "list";
+  filterYr=null; filterGr=null; filterGen=null; search="";
+  tournaments=[]; players=[];
+  render();
+  await startListeners();
+  showPwaBannerAfterDelay();
+}
+
+async function login(){
+  const {error} = await sb.auth.signInWithOAuth({
+    provider:'google',
+    options:{ redirectTo: window.location.href }
+  });
+  if(error) alert("ログイン失敗: "+error.message);
+}
+async function logout(){
+  stopListeners();
+  currentTeam=null; myTeams=[];
+  await sb.auth.signOut();
+}
+
+// ── Invite link handling ──────────────────────────────────────────────
+function checkUrlForInvite(){
+  const params = new URLSearchParams(window.location.search);
+  const token  = params.get('invite');
+  if(token){
+    // URLからトークンを取り除く
+    const url = new URL(window.location.href);
+    url.searchParams.delete('invite');
+    history.replaceState(null,'',url.toString());
+    if(user){ pendingInviteToken=token; handleInviteToken(token); }
+    else { sessionStorage.setItem('invite_token',token); }
+  }
+}
+
+async function handleInviteToken(token){
+  // トークンでチームを検索
+  const {data:team} = await sb.from('teams')
+    .select('id,name,invite_token')
+    .eq('invite_token',token)
+    .single();
+  pendingInviteToken=null;
+  if(!team){ alert("招待リンクが無効です"); view="team_select"; render(); return; }
+  // すでに所属していれば直接移動
+  const already = myTeams.find(t=>t.id===team.id);
+  if(already){ await selectTeam(already); return; }
+  // 確認UI
+  pendingTeamInfo = team;
+  view="join_confirm";
+  render();
+}
+
+async function joinTeam(){
+  if(!pendingTeamInfo) return;
+  const {error} = await sb.from('team_members')
+    .insert({team_id:pendingTeamInfo.id, user_id:user.id, role:'member'});
+  if(error){ joinTeamError="参加に失敗しました: "+error.message; render(); return; }
+  await loadMyTeams();
+  const joined = myTeams.find(t=>t.id===pendingTeamInfo.id);
+  pendingTeamInfo=null;
+  if(joined) await selectTeam(joined);
+}
+
+async function createTeam(){
+  if(!newTeamName.trim()){ newTeamError="チーム名を入力してください"; render(); return; }
+  const {data,error} = await sb.from('teams')
+    .insert({name:newTeamName.trim(), created_by:user.id})
+    .select()
+    .single();
+  if(error){ newTeamError="作成に失敗しました: "+error.message; render(); return; }
+  await loadMyTeams();
+  const created = myTeams.find(t=>t.id===data.id);
+  newTeamName=""; newTeamError="";
+  if(created) await selectTeam(created);
+}
+
+// ── Firestore ops → Supabase ──────────────────────────────────────────
+async function addTournament(){
+  if(!tf.name){te="大会名は必須です";render();return;}
+  if(!tf.date){te="日付は必須です";render();return;}
+  const escorts=tf.escorts.filter(e=>e.name);
+  const {data:t,error} = await sb.from('tournaments').insert({
+    team_id:currentTeam.id, name:tf.name, grade:tf.grade,
+    gender:tf.gender, date:tf.date, venue:tf.venue||null
+  }).select().single();
+  if(error){te="保存に失敗しました";render();return;}
+  if(escorts.length>0){
+    await sb.from('escorts').insert(escorts.map(e=>({tournament_id:t.id,name:e.name,dir:e.dir})));
+  }
+  tf={name:"",grade:"U-12",gender:"男子",date:today(),venue:"",escorts:[{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"}]};
+  te=""; view="list"; await loadTournaments();
+}
+
+async function updateTournament(){
+  if(!tf.name){te="大会名は必須です";render();return;}
+  const escorts=tf.escorts.filter(e=>e.name);
+  const {error} = await sb.from('tournaments').update({
+    name:tf.name,grade:tf.grade,gender:tf.gender,date:tf.date,venue:tf.venue||null
+  }).eq('id',sel);
+  if(error){te="保存に失敗しました";render();return;}
+  await sb.from('escorts').delete().eq('tournament_id',sel);
+  if(escorts.length>0)
+    await sb.from('escorts').insert(escorts.map(e=>({tournament_id:sel,name:e.name,dir:e.dir})));
+  te=""; view="td"; await loadTournaments();
+}
+
+async function deleteTournament(tid){
+  if(!confirm("この大会を削除しますか？（試合データも全て削除されます）")) return;
+  await sb.from('tournaments').delete().eq('id',tid);
+  view="list"; await loadTournaments();
+}
+
+async function addGame(){
+  if(!gf.opponent||gf.ourScore===""||gf.theirScore===""){ge="相手・スコアは必須です";render();return;}
+  const {error} = await sb.from('games').insert({
+    tournament_id:sel,opponent:gf.opponent,
+    our_score:parseInt(gf.ourScore),their_score:parseInt(gf.theirScore),
+    memo:gf.memo||null
+  });
+  if(error){ge="保存に失敗しました";render();return;}
+  gf={opponent:"",ourScore:"",theirScore:"",memo:""}; ge=""; view="td"; await loadTournaments();
+}
+
+async function updateGame(){
+  if(!gf.opponent||gf.ourScore===""||gf.theirScore===""){ge="相手・スコアは必須です";render();return;}
+  await sb.from('games').update({
+    opponent:gf.opponent,our_score:parseInt(gf.ourScore),
+    their_score:parseInt(gf.theirScore),memo:gf.memo||null
+  }).eq('id',editGameId);
+  gf={opponent:"",ourScore:"",theirScore:"",memo:""}; ge=""; editGameId=null; view="td"; await loadTournaments();
+}
+
+async function deleteGame(gid){
+  if(!confirm("この試合を削除しますか？")) return;
+  await sb.from('games').delete().eq('id',gid);
+  view="td"; await loadTournaments();
+}
+
+// ── Player CRUD ──────────────────────────────────────────────────────
+function sortPlayers(arr){
+  return [...arr].sort((a,b)=>{
+    const ga=calcGrade(a.enroll_year)??0, gb=calcGrade(b.enroll_year)??0;
+    if(gb!==ga) return gb-ga;
+    return (a.join_order??9999)-(b.join_order??9999);
+  });
+}
+function calcGrade(enrollYear){
+  const fy = filterYr!==null?filterYr:fiscalYear(today());
+  const grade=fy-enrollYear+1;
+  return grade>=1&&grade<=6?grade:null;
+}
+function gradeLabel(enrollYear){
+  const g=calcGrade(enrollYear);
+  return g?`${g}年`:"卒";
+}
+
+async function addPlayer(){
+  if(!pf.name.trim()){pe="名前は必須です";render();return;}
+  if(!pf.enrollYear||isNaN(parseInt(pf.enrollYear))){pe="入学年度は必須です";render();return;}
+  await sb.from('players').insert({
+    team_id:currentTeam.id, name:pf.name.trim(), furigana:pf.furigana.trim()||null,
+    join_order:pf.joinOrder!==''?parseInt(pf.joinOrder):null,
+    enroll_year:parseInt(pf.enrollYear), gender:pf.gender
+  });
+  pf={name:"",furigana:"",joinOrder:"",enrollYear:String(new Date().getFullYear()),gender:"男子"};
+  pe=""; players_tab="list"; await loadPlayers();
+}
+
+async function updatePlayer(){
+  if(!pf.name.trim()){pe="名前は必須です";render();return;}
+  await sb.from('players').update({
+    name:pf.name.trim(), furigana:pf.furigana.trim()||null,
+    join_order:pf.joinOrder!==''?parseInt(pf.joinOrder):null,
+    enroll_year:parseInt(pf.enrollYear), gender:pf.gender
+  }).eq('id',editPlayerId);
+  pf={name:"",furigana:"",joinOrder:"",enrollYear:String(new Date().getFullYear()),gender:"男子"};
+  pe=""; editPlayerId=null; players_tab="list"; await loadPlayers();
+}
+
+async function deletePlayer(pid){
+  if(!confirm("このプレイヤーを削除しますか？")) return;
+  await sb.from('players').delete().eq('id',pid);
+  await loadPlayers();
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────
+async function saveStats(){
+  const entries = Object.entries(sf).map(([pid,v])=>({
+    game_id:selGame.id, player_id:pid,
+    play_time:v.playTime||0, points:v.points||0, rebounds:v.rebounds||0
+  }));
+  await sb.from('game_stats').delete().eq('game_id',selGame.id);
+  if(entries.length>0) await sb.from('game_stats').insert(entries);
+  await loadTournaments();
+  // refresh selGame
+  const updated=tournaments.find(x=>x.id===sel);
+  if(updated) selGame=(updated.games||[]).find(g=>g.id===selGame.id)||selGame;
+  view="gd"; render();
+}
+
+// ── Invite link ──────────────────────────────────────────────────────
+function getInviteLink(){
+  return `${window.location.origin}${window.location.pathname}?invite=${currentTeam.invite_token}`;
+}
+function copyInviteLink(){
+  navigator.clipboard.writeText(getInviteLink()).then(()=>alert("招待リンクをコピーしました！"));
+}
+
+// ── Derived data ──────────────────────────────────────────────────────
+function getYears(){ return [...new Set(tournaments.map(t=>fiscalYear(t.date)))].sort((a,b)=>b-a); }
+function getFiltered(){
+  let ts=filterYr!==null?tournaments.filter(t=>fiscalYear(t.date)===filterYr):tournaments;
+  if(filterGr) ts=ts.filter(t=>t.grade===filterGr);
+  if(filterGen) ts=ts.filter(t=>(t.gender||"男子")===filterGen);
+  return ts.map(t=>({...t,games:(t.games||[]).filter(g=>search.trim()?g.opponent.startsWith(search.trim()):true)}))
+    .filter(t=>t.games.length>0||!search.trim());
+}
+function getStats(filt){
+  let w=0,l=0,d=0;
+  filt.forEach(t=>t.games.forEach(g=>{const r=res(g);if(r==="win")w++;else if(r==="lose")l++;else d++;}));
+  return {tc:filt.length,tot:w+l+d,w,l,d};
+}
+function getEscSummary(filt){
+  const m={};
+  filt.forEach(t=>(t.escorts||[]).filter(e=>e.name).forEach(e=>{m[e.name]=(m[e.name]||0)+escScore(e.dir);}));
+  return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+}
+
+// ── PWA ──────────────────────────────────────────────────────────────
+let deferredPrompt=null, pwaTimerStarted=false;
+window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredPrompt=e;});
+function shouldShowPwaBanner(){
+  if(window.matchMedia("(display-mode: standalone)").matches) return false;
+  if(window.navigator.standalone===true) return false;
+  const count=parseInt(localStorage.getItem("loginCount")||"0")+1;
+  localStorage.setItem("loginCount",String(count));
+  return count%5===0;
+}
+function showPwaBannerAfterDelay(){
+  if(pwaTimerStarted) return;
+  if(!shouldShowPwaBanner()) return;
+  pwaTimerStarted=true;
+  setTimeout(()=>{const b=document.getElementById("pwa-banner");if(b)b.style.display="flex";},3000);
+}
+function dismissPwaBanner(){ const b=document.getElementById("pwa-banner");if(b)b.style.display="none"; }
+async function triggerAndroidInstall(){
+  if(deferredPrompt){ deferredPrompt.prompt();const{outcome}=await deferredPrompt.userChoice;if(outcome==="accepted")dismissPwaBanner();deferredPrompt=null; }
+}
+window.dismissPwaBanner=dismissPwaBanner;
+window.triggerAndroidInstall=triggerAndroidInstall;
+
+// ── Render ────────────────────────────────────────────────────────────
+function render(){
+  const root=document.getElementById("root");
+  const focused=document.activeElement;
+  const wasSearch=focused&&focused.placeholder==="相手チームを検索";
+  root.innerHTML="";
+  root.appendChild(build());
+  if(wasSearch){
+    const si=root.querySelector("input[placeholder='相手チームを検索']");
+    if(si){si.focus();si.setSelectionRange(si.value.length,si.value.length);}
+  }
+}
+
+function el(tag,attrs={},children=[]){
+  const e=document.createElement(tag);
+  Object.entries(attrs).forEach(([k,v])=>{
+    if(k==="style"&&typeof v==="object") Object.assign(e.style,v);
+    else if(k.startsWith("on")) e.addEventListener(k.slice(2).toLowerCase(),v);
+    else e.setAttribute(k,v);
+  });
+  children.forEach(c=>{if(c==null)return;e.appendChild(typeof c==="string"?document.createTextNode(c):c);});
+  return e;
+}
+
+const S={
+  root:{fontFamily:"'Hiragino Sans','Noto Sans JP',sans-serif",background:"#f1f5f9",minHeight:"100vh",paddingBottom:"100px"},
+  hdr:{background:"#0f2744",color:"#fff",padding:"18px 18px 14px",position:"sticky",top:"0",zIndex:"10"},
+  ht:{fontSize:"17px",fontWeight:"800"},
+  back:{background:"none",border:"none",color:"rgba(255,255,255,0.75)",fontSize:"14px",cursor:"pointer",padding:"0",marginBottom:"10px",fontFamily:"inherit"},
+  ytWrap:{display:"flex",gap:"6px",marginTop:"10px",overflowX:"auto",WebkitOverflowScrolling:"touch",paddingBottom:"2px",scrollbarWidth:"none"},
+  ytb:{background:"rgba(255,255,255,0.12)",border:"none",color:"rgba(255,255,255,0.7)",borderRadius:"20px",padding:"5px 14px",fontSize:"13px",cursor:"pointer",fontFamily:"inherit",flexShrink:"0",whiteSpace:"nowrap"},
+  ytba:{background:"#fff",color:"#0f2744",fontWeight:"700"},
+  filterRow:{display:"flex",alignItems:"center",gap:"6px",marginTop:"8px",flexWrap:"wrap"},
+  filterGroup:{display:"flex",gap:"5px"},
+  filterDivider:{width:"1px",height:"18px",background:"rgba(255,255,255,0.2)",flexShrink:"0"},
+  grfBtn:{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.65)",borderRadius:"16px",padding:"4px 11px",fontSize:"12px",cursor:"pointer",fontFamily:"inherit",flexShrink:"0",whiteSpace:"nowrap"},
+  grfBtnA:{background:"rgba(255,255,255,0.9)",color:"#0f2744",fontWeight:"700",border:"1px solid transparent"},
+  strow:{display:"flex",gap:"8px",marginTop:"10px"},
+  sb:{flex:"1",background:"rgba(255,255,255,0.1)",borderRadius:"10px",padding:"8px 6px",textAlign:"center"},
+  sn:{fontSize:"22px",fontWeight:"900",lineHeight:"1",color:"#fff"},
+  sl:{fontSize:"11px",opacity:"0.7",marginTop:"1px"},
+  toolRow:{display:"flex",alignItems:"center",gap:"8px",marginTop:"10px"},
+  eb:{background:"rgba(255,255,255,0.12)",border:"1px solid rgba(255,255,255,0.2)",color:"rgba(255,255,255,0.85)",borderRadius:"8px",padding:"7px 12px",fontSize:"12px",cursor:"pointer",fontFamily:"inherit",flexShrink:"0",whiteSpace:"nowrap"},
+  searchWrap:{flex:"1",display:"flex",alignItems:"center",background:"rgba(255,255,255,0.12)",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.2)",padding:"0 10px",minWidth:"0"},
+  body:{padding:"14px 14px 0"},
+  tc:{background:"#fff",borderRadius:"14px",padding:"14px 14px 10px",marginBottom:"12px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",cursor:"pointer"},
+  gc:{background:"#fff",borderRadius:"12px",padding:"12px 14px",marginBottom:"10px",display:"flex",alignItems:"flex-start",gap:"12px",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"},
+  bdg:{width:"34px",height:"34px",borderRadius:"9px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",fontWeight:"900",flexShrink:"0"},
+  fab:{position:"fixed",bottom:"24px",right:"24px",width:"56px",height:"56px",borderRadius:"50%",background:"#0f2744",color:"#fff",fontSize:"26px",border:"none",boxShadow:"0 4px 16px rgba(15,39,68,0.45)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:"100"},
+  lbl:{fontSize:"13px",color:"#6b7280",fontWeight:"600",marginBottom:"5px",display:"block"},
+  inp:{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:"10px",padding:"12px 14px",fontSize:"16px",marginBottom:"12px",boxSizing:"border-box",color:"#1f2937",outline:"none",fontFamily:"inherit"},
+  bp:{width:"100%",background:"#0f2744",color:"#fff",border:"none",borderRadius:"12px",padding:"15px",fontSize:"16px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit",marginBottom:"0"},
+  bsc:{width:"100%",background:"#f3f4f6",color:"#6b7280",border:"none",borderRadius:"12px",padding:"13px",fontSize:"15px",fontWeight:"600",cursor:"pointer",marginTop:"8px",fontFamily:"inherit"},
+  err:{color:"#dc2626",fontSize:"13px",marginBottom:"10px"},
+  emp:{textAlign:"center",padding:"60px 20px",color:"#94a3b8"},
+};
+
+function mkHdr(title,sub,showBack,backFn){
+  const d=el("div",{style:S.hdr});
+  if(showBack) d.appendChild(el("button",{style:S.back,onClick:backFn},["← 戻る"]));
+  d.appendChild(el("div",{style:S.ht},[title]));
+  if(sub) d.appendChild(el("div",{style:{fontSize:"13px",opacity:"0.65",marginTop:"2px"}},[sub]));
+  return d;
+}
+function mkBtn(label,onClick,style={}){return el("button",{style:{...S.bp,...style},onClick},[label]);}
+function mkLabel(txt){return el("label",{style:S.lbl},[txt]);}
+function mkInput(placeholder,value,onChange,type="text"){
+  const i=el("input",{style:S.inp,placeholder,type,value:value??""});
+  i.addEventListener("input",e=>onChange(e.target.value));
+  return i;
+}
+function mkGradePills(selected,onChange){
+  const row=el("div",{style:{display:"flex",gap:"8px",marginBottom:"14px"}});
+  GRADES.forEach(g=>{
+    const active=selected===g;
+    row.appendChild(el("button",{
+      style:{flex:"1",padding:"10px",borderRadius:"10px",border:`1.5px solid ${active?"#0f2744":"#e5e7eb"}`,background:active?"#0f2744":"#f9fafb",fontSize:"14px",fontWeight:"600",cursor:"pointer",color:active?"#fff":"#6b7280",fontFamily:"inherit"},
+      onClick:()=>onChange(g)
+    },[g]));
+  });
+  return row;
+}
+function mkGenderPills(selected,onChange){
+  const row=el("div",{style:{display:"flex",gap:"8px",marginBottom:"14px"}});
+  GENDERS.forEach(g=>{
+    const active=selected===g;
+    const ac=g==="男子"?"#1d4ed8":"#be185d";
+    row.appendChild(el("button",{
+      style:{flex:"1",padding:"10px",borderRadius:"10px",border:`1.5px solid ${active?ac:"#e5e7eb"}`,background:active?ac:"#f9fafb",fontSize:"14px",fontWeight:"600",cursor:"pointer",color:active?"#fff":"#6b7280",fontFamily:"inherit"},
+      onClick:()=>onChange(g)
+    },[g]));
+  });
+  return row;
+}
+function mkScoreRow(){
+  const sr=el("div",{style:{display:"flex",gap:"8px",alignItems:"flex-end",marginBottom:"14px"}});
+  const mkSide=(label,val,key)=>{
+    const w=el("div",{style:{flex:"1",display:"flex",flexDirection:"column",alignItems:"center",minWidth:"0"}});
+    w.appendChild(el("div",{style:{fontSize:"11px",color:"#9ca3af",marginBottom:"4px",fontWeight:"600"}},[label]));
+    const i=el("input",{style:{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:"10px",padding:"10px 4px",fontSize:"26px",fontWeight:"900",textAlign:"center",boxSizing:"border-box",color:"#0f2744",fontFamily:"inherit",outline:"none"},type:"number",inputmode:"numeric",placeholder:"0"});
+    i.value=val??"";
+    i.addEventListener("input",e=>{gf[key]=e.target.value;});
+    w.appendChild(i);
+    return w;
+  };
+  sr.appendChild(mkSide("自チーム",gf.ourScore,"ourScore"));
+  sr.appendChild(el("span",{style:{fontSize:"20px",fontWeight:"800",color:"#d1d5db",flexShrink:"0",paddingBottom:"10px"}},["–"]));
+  sr.appendChild(mkSide("相手",gf.theirScore,"theirScore"));
+  return sr;
+}
+function mkEscortRows(body){
+  tf.escorts.forEach((e,i)=>{
+    const row=el("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginBottom:"10px"}});
+    const inp=el("input",{style:{...S.inp,marginBottom:"0",flex:"1"},placeholder:`引率者${i+1}（任意）`,autocomplete:"off"});
+    inp.value=e.name;
+    inp.addEventListener("input",ev=>{tf.escorts[i].name=ev.target.value;});
+    row.appendChild(inp);
+    const dirRow=el("div",{style:{display:"flex",gap:"4px",flexShrink:"0"}});
+    ["round","one"].forEach(d=>{
+      const active=e.dir===d;
+      dirRow.appendChild(el("button",{
+        style:{padding:"8px 10px",borderRadius:"8px",border:`1.5px solid ${active?"#0f2744":"#e5e7eb"}`,background:active?"#0f2744":"#f9fafb",fontSize:"12px",fontWeight:"600",cursor:"pointer",color:active?"#fff":"#6b7280",fontFamily:"inherit",whiteSpace:"nowrap"},
+        onClick:()=>{tf.escorts[i].dir=d;render();}
+      },[d==="round"?"往復":"片道"]));
+    });
+    row.appendChild(dirRow);
+    body.appendChild(row);
+  });
+  body.appendChild(el("div",{style:{fontSize:"12px",color:"#94a3b8",marginBottom:"16px"}},["往復＝1回、片道＝0.5回でカウント"]));
+}
+
+// ── Build ─────────────────────────────────────────────────────────────
+function build(){
+  const wrap=el("div",{style:S.root});
+  if(view==="loading"){    wrap.appendChild(buildLoading());    return wrap;}
+  if(view==="login"){      wrap.appendChild(buildLogin());      return wrap;}
+  if(view==="team_select"){wrap.appendChild(buildTeamSelect()); return wrap;}
+  if(view==="join_confirm"){wrap.appendChild(buildJoinConfirm());return wrap;}
+  if(view==="td"){   wrap.appendChild(buildTD());    return wrap;}
+  if(view==="ag"){   wrap.appendChild(buildAG());    return wrap;}
+  if(view==="eg"){   wrap.appendChild(buildEG());    return wrap;}
+  if(view==="at"){   wrap.appendChild(buildAT());    return wrap;}
+  if(view==="et"){   wrap.appendChild(buildET());    return wrap;}
+  if(view==="anal"){    wrap.appendChild(buildAnal());    return wrap;}
+  if(view==="players"){ wrap.appendChild(buildPlayers()); return wrap;}
+  if(view==="gd"){      wrap.appendChild(buildGD());      return wrap;}
+  if(view==="gs"){      wrap.appendChild(buildGS());      return wrap;}
+  if(view==="settings"){wrap.appendChild(buildSettings()); return wrap;}
+  wrap.appendChild(buildList());
+  return wrap;
+}
+
+// ── Loading ───────────────────────────────────────────────────────────
+function buildLoading(){
+  return el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",gap:"16px"}},[
+    el("div",{style:{fontSize:"48px"}},["🏀"]),
+    el("div",{style:{fontSize:"14px",color:"#94a3b8"}},["読み込み中..."])
+  ]);
+}
+
+// ── Login ─────────────────────────────────────────────────────────────
+function buildLogin(){
+  return el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",gap:"24px",padding:"40px 20px"}},[
+    el("div",{style:{fontSize:"52px"}},["🏀"]),
+    el("div",{style:{fontSize:"26px",fontWeight:"800",color:"#0f2744"}},["minibasket-log"]),
+    el("div",{style:{fontSize:"14px",color:"#6b7280",textAlign:"center"}},["ミニバスケットボールチームの戦績管理アプリ"]),
+    el("button",{
+      style:{background:"#0f2744",color:"#fff",border:"none",borderRadius:"12px",padding:"14px 32px",fontSize:"16px",fontWeight:"700",cursor:"pointer",display:"flex",alignItems:"center",gap:"8px"},
+      onClick:login
+    },["Googleでログイン"])
+  ]);
+}
+
+// ── Team Select ───────────────────────────────────────────────────────
+function buildTeamSelect(){
+  const wrap=el("div",{style:{display:"flex",flexDirection:"column",minHeight:"100vh",background:"#f1f5f9"}});
+  const hdr=el("div",{style:{background:"#0f2744",color:"#fff",padding:"24px 18px 20px"}});
+  hdr.appendChild(el("div",{style:{fontSize:"22px",fontWeight:"800",marginBottom:"4px"}},["🏀 minibasket-log"]));
+  hdr.appendChild(el("div",{style:{fontSize:"13px",opacity:"0.7"}},[user?.email||""]));
+  wrap.appendChild(hdr);
+
+  const body=el("div",{style:{padding:"20px 16px"}});
+
+  // 所属チーム一覧
+  if(myTeams.length>0){
+    body.appendChild(el("div",{style:{fontSize:"13px",fontWeight:"700",color:"#6b7280",marginBottom:"10px"}},["所属チーム"]));
+    myTeams.forEach(team=>{
+      const card=el("div",{
+        style:{background:"#fff",borderRadius:"14px",padding:"16px",marginBottom:"10px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",cursor:"pointer",display:"flex",alignItems:"center",gap:"12px"},
+        onClick:()=>selectTeam(team)
+      });
+      card.appendChild(el("div",{style:{width:"44px",height:"44px",borderRadius:"12px",background:"#0f2744",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"20px",flexShrink:"0"}},["🏀"]));
+      const info=el("div",{style:{flex:"1"}});
+      info.appendChild(el("div",{style:{fontWeight:"700",fontSize:"16px",color:"#0f2744"}},[team.name]));
+      info.appendChild(el("div",{style:{fontSize:"12px",color:"#94a3b8",marginTop:"2px"}},[team.role==="admin"?"管理者":"メンバー"]));
+      card.appendChild(info);
+      card.appendChild(el("span",{style:{fontSize:"20px",color:"#cbd5e1"}},["›"]));
+      body.appendChild(card);
+    });
+  }
+
+  // チーム作成
+  body.appendChild(el("div",{style:{height:"20px"}}));
+  body.appendChild(el("div",{style:{fontSize:"13px",fontWeight:"700",color:"#6b7280",marginBottom:"10px"}},["新しいチームを作成"]));
+  if(newTeamError) body.appendChild(el("div",{style:S.err},[`⚠ ${newTeamError}`]));
+  const inp=el("input",{style:{...S.inp},placeholder:"チーム名（例：○○ミニバスケットボールクラブ）"});
+  inp.value=newTeamName;
+  inp.addEventListener("input",e=>{newTeamName=e.target.value;});
+  body.appendChild(inp);
+  body.appendChild(mkBtn("チームを作成して始める",createTeam));
+
+  // ログアウト
+  body.appendChild(el("div",{style:{marginTop:"24px",textAlign:"center"}},[
+    el("button",{style:{background:"none",border:"none",color:"#9ca3af",fontSize:"13px",cursor:"pointer",fontFamily:"inherit"},onClick:logout},["ログアウト"])
+  ]));
+
+  wrap.appendChild(body);
+  return wrap;
+}
+
+// ── Join Confirm ──────────────────────────────────────────────────────
+function buildJoinConfirm(){
+  return el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",gap:"20px",padding:"40px 24px",background:"#f1f5f9"}},[
+    el("div",{style:{fontSize:"48px"}},["🏀"]),
+    el("div",{style:{fontSize:"20px",fontWeight:"800",color:"#0f2744",textAlign:"center"}},[`「${pendingTeamInfo?.name}」に参加しますか？`]),
+    el("div",{style:{fontSize:"14px",color:"#6b7280",textAlign:"center"}},["招待リンクでこのチームへの参加を求められています"]),
+    joinTeamError?el("div",{style:{color:"#dc2626",fontSize:"13px"}},[joinTeamError]):null,
+    el("div",{style:{display:"flex",flexDirection:"column",gap:"10px",width:"100%",maxWidth:"340px"}},[
+      mkBtn("参加する",joinTeam),
+      el("button",{style:S.bsc,onClick:()=>{pendingTeamInfo=null;view=myTeams.length?"team_select":"team_select";render();}},["キャンセル"])
+    ])
+  ]);
+}
+
+// ── List ──────────────────────────────────────────────────────────────
+function buildList(){
+  const years=getYears();
+  const filt=getFiltered();
+  const stats=getStats(filt);
+  const wrap=el("div",{});
+
+  const hdr=el("div",{style:S.hdr});
+  const titleRow=el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between"}});
+  titleRow.appendChild(el("div",{style:S.ht},[`🏀 ${currentTeam?.name||""}`]));
+  const userWrap=el("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
+  userWrap.appendChild(el("span",{style:{fontSize:"12px",opacity:"0.7"}},[isAdmin?"✏️管理者":"👁閲覧"]));
+  userWrap.appendChild(el("button",{
+    style:{background:"rgba(255,255,255,0.15)",border:"none",color:"rgba(255,255,255,0.8)",borderRadius:"8px",padding:"5px 10px",fontSize:"11px",cursor:"pointer",fontFamily:"inherit"},
+    onClick:()=>{view="settings";render();}
+  },["⚙"]));
+  titleRow.appendChild(userWrap);
+  hdr.appendChild(titleRow);
+
+  const ytWrap=el("div",{style:S.ytWrap});
+  years.forEach(y=>{
+    const active=y===filterYr;
+    ytWrap.appendChild(el("button",{
+      style:{...S.ytb,...(active?S.ytba:{})},
+      onClick:()=>{filterYr=active?null:y;render();}
+    },[`${y}年度`]));
+  });
+  hdr.appendChild(ytWrap);
+
+  const fRow=el("div",{style:S.filterRow});
+  const grpGrade=el("div",{style:S.filterGroup});
+  GRADES.forEach(g=>{
+    const active=g===filterGr;
+    grpGrade.appendChild(el("button",{style:{...S.grfBtn,...(active?S.grfBtnA:{})},onClick:()=>{filterGr=active?null:g;render();}},[g]));
+  });
+  fRow.appendChild(grpGrade);
+  fRow.appendChild(el("div",{style:S.filterDivider}));
+  const grpGen=el("div",{style:S.filterGroup});
+  GENDERS.forEach(g=>{
+    const active=g===filterGen;
+    grpGen.appendChild(el("button",{
+      style:{...S.grfBtn,...(active?{background:g==="男子"?"#3b82f6":"#ec4899",color:"#fff",border:"1px solid transparent"}:{})},
+      onClick:()=>{filterGen=active?null:g;render();}
+    },[g]));
+  });
+  fRow.appendChild(grpGen);
+  hdr.appendChild(fRow);
+
+  const strow=el("div",{style:S.strow});
+  [[stats.tc,"大会","rgba(255,255,255,0.08)","rgba(255,255,255,0.6)"],[stats.tot,"試合","rgba(255,255,255,0.1)","#fff"],[stats.w,"勝","rgba(52,211,153,0.2)","#6ee7b7"],[stats.l,"敗","rgba(239,68,68,0.2)","#fca5a5"],[stats.d,"分","rgba(245,158,11,0.15)","#fcd34d"]]
+    .forEach(([n,lbl,bg,fc])=>{
+      const b=el("div",{style:{...S.sb,background:bg}});
+      b.appendChild(el("div",{style:{...S.sn,color:fc}},[String(n)]));
+      b.appendChild(el("div",{style:S.sl},[lbl]));
+      strow.appendChild(b);
+    });
+  hdr.appendChild(strow);
+
+  const toolRow=el("div",{style:S.toolRow});
+  toolRow.appendChild(el("button",{style:S.eb,onClick:()=>{view="anal";render();}},["📊 分析"]));
+  if(isAdmin) toolRow.appendChild(el("button",{style:S.eb,onClick:()=>{players_tab="list";view="players";render();}},["👥 選手"]));
+  const sw=el("div",{style:S.searchWrap});
+  sw.appendChild(el("span",{style:{fontSize:"13px",opacity:"0.7",flexShrink:"0"}},["🔍"]));
+  const si=el("input",{style:{flex:"1",background:"none",border:"none",outline:"none",color:"#fff",fontSize:"13px",padding:"7px 6px",fontFamily:"inherit",minWidth:"0"},placeholder:"相手チームを検索"});
+  si.value=search;
+  let composing=false;
+  si.addEventListener("compositionstart",()=>{composing=true;});
+  si.addEventListener("compositionend",e=>{composing=false;search=e.target.value;render();});
+  si.addEventListener("input",e=>{if(!composing){search=e.target.value;render();}});
+  sw.appendChild(si);
+  if(search){
+    sw.appendChild(el("button",{style:{background:"none",border:"none",color:"rgba(255,255,255,0.5)",fontSize:"14px",cursor:"pointer",padding:"0 2px"},onClick:()=>{search="";render();}},["✕"]));
+  }
+  toolRow.appendChild(sw);
+  hdr.appendChild(toolRow);
+  wrap.appendChild(hdr);
+
+  const body=el("div",{style:S.body});
+  if(filt.length===0){
+    body.appendChild(el("div",{style:S.emp},[
+      el("div",{style:{fontSize:"44px",marginBottom:"10px"}},["🏀"]),
+      el("div",{},[tournaments.length===0?"大会データがありません":"条件に合う大会がありません"])
+    ]));
+  } else {
+    filt.forEach(t=>{
+      const tGender=t.gender||"男子";
+      const genderColor=tGender==="男子"?"#1d4ed8":"#be185d";
+      const genderBg=tGender==="男子"?"#dbeafe":"#fce7f3";
+      const tw=t.games.filter(g=>res(g)==="win").length;
+      const tl=t.games.filter(g=>res(g)==="lose").length;
+      const card=el("div",{style:S.tc,onClick:()=>{sel=t.id;view="td";render();}});
+      const top=el("div",{style:{display:"flex",alignItems:"center",gap:"6px"}});
+      top.appendChild(el("span",{style:{background:"#dbeafe",color:"#1d4ed8",fontSize:"11px",fontWeight:"700",padding:"3px 8px",borderRadius:"6px",flexShrink:"0"}},[t.grade]));
+      top.appendChild(el("span",{style:{background:genderBg,color:genderColor,fontSize:"11px",fontWeight:"700",padding:"3px 8px",borderRadius:"6px",flexShrink:"0"}},[tGender]));
+      top.appendChild(el("span",{style:{fontWeight:"700",fontSize:"16px",color:"#0f2744",flex:"1"}},[t.name]));
+      top.appendChild(el("span",{style:{fontSize:"20px",color:"#cbd5e1"}},["›"]));
+      card.appendChild(top);
+      card.appendChild(el("div",{style:{fontSize:"12px",color:"#94a3b8",marginTop:"4px",marginBottom:"6px"}},[`📅 ${fmtD(t.date)}${t.venue?`　📍 ${t.venue}`:""}`]));
+      const meta=el("div",{style:{display:"flex",gap:"10px",flexWrap:"wrap"}});
+      [[`${t.games.length}試合`,"#6b7280"],[`✓${tw}勝`,"#059669"],[`✗${tl}敗`,"#dc2626"]].forEach(([txt,c])=>
+        meta.appendChild(el("span",{style:{fontSize:"12px",color:c,fontWeight:"500"}},[txt])));
+      if((t.escorts||[]).length>0)
+        meta.appendChild(el("span",{style:{fontSize:"12px",color:"#6b7280"}},[`👤${t.escorts.map(e=>e.name).join("・")}`]));
+      card.appendChild(meta);
+      if(t.games.length>0){
+        const pv=el("div",{style:{marginTop:"10px",borderTop:"1px solid #f1f5f9",paddingTop:"8px"}});
+        t.games.slice(0,3).forEach(g=>{
+          const rb=RB[res(g)];
+          const row=el("div",{style:{display:"flex",alignItems:"center",gap:"6px",marginBottom:"5px"}});
+          row.appendChild(el("span",{style:{width:"22px",height:"22px",borderRadius:"6px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",fontWeight:"800",flexShrink:"0",background:rb.bg,color:rb.c}},[rb.t]));
+          row.appendChild(el("span",{style:{fontSize:"13px",color:"#374151",flex:"1"}},[`vs ${g.opponent}`]));
+          row.appendChild(el("span",{style:{fontSize:"14px",fontWeight:"700",color:"#0f2744"}},[`${g.our_score}–${g.their_score}`]));
+          pv.appendChild(row);
+        });
+        if(t.games.length>3) pv.appendChild(el("div",{style:{fontSize:"12px",color:"#9ca3af",marginTop:"2px"}},[`他 ${t.games.length-3} 試合…`]));
+        card.appendChild(pv);
+      }
+      body.appendChild(card);
+    });
+  }
+  wrap.appendChild(body);
+  if(isAdmin) wrap.appendChild(el("button",{style:S.fab,onClick:()=>{view="at";render();}},["＋"]));
+  return wrap;
+}
+
+// ── Tournament Detail ─────────────────────────────────────────────────
+function buildTD(){
+  const t=tournaments.find(x=>x.id===sel);
+  if(!t) return el("div",{},[]);
+  const tGender=t.gender||"男子";
+  const genderColor=tGender==="男子"?"#1d4ed8":"#be185d";
+  const genderBg=tGender==="男子"?"#dbeafe":"#fce7f3";
+  const tw=t.games.filter(g=>res(g)==="win").length;
+  const tl=t.games.filter(g=>res(g)==="lose").length;
+  const td2=t.games.filter(g=>res(g)==="draw").length;
+  const wrap=el("div",{});
+  const hdr=el("div",{style:{...S.hdr,paddingBottom:"20px"}});
+  hdr.appendChild(el("button",{style:S.back,onClick:()=>{view="list";render();}},["← 戻る"]));
+  const top=el("div",{style:{display:"flex",alignItems:"center",gap:"6px",marginTop:"2px"}});
+  top.appendChild(el("span",{style:{display:"inline-block",background:"#dbeafe",color:"#1d4ed8",fontSize:"12px",fontWeight:"700",padding:"3px 10px",borderRadius:"6px"}},[t.grade]));
+  top.appendChild(el("span",{style:{display:"inline-block",background:genderBg,color:genderColor,fontSize:"12px",fontWeight:"700",padding:"3px 10px",borderRadius:"6px"}},[tGender]));
+  if(isAdmin){
+    top.appendChild(el("button",{
+      style:{marginLeft:"auto",background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.3)",color:"rgba(255,255,255,0.9)",borderRadius:"8px",padding:"5px 12px",fontSize:"12px",fontWeight:"600",cursor:"pointer",fontFamily:"inherit",flexShrink:"0"},
+      onClick:()=>{
+        tf={
+          name:t.name,grade:t.grade,gender:tGender,date:t.date,venue:t.venue||"",
+          escorts:[...(t.escorts||[]).map(e=>({name:e.name,dir:e.dir})),...Array(Math.max(0,5-(t.escorts||[]).length)).fill({name:"",dir:"round"})].slice(0,5)
+        };
+        view="et";render();
+      }
+    },["✏️ 大会を修正"]));
+  }
+  top.appendChild(el("span",{style:{fontSize:"13px",opacity:"0.65",flexShrink:"0"}},[`📅 ${fmtD(t.date)}`]));
+  hdr.appendChild(top);
+  hdr.appendChild(el("div",{style:{fontSize:"20px",fontWeight:"800",marginTop:"6px"}},[t.name]));
+  if(t.venue) hdr.appendChild(el("div",{style:{fontSize:"13px",opacity:"0.75",marginTop:"3px"}},[`📍 ${t.venue}`]));
+  hdr.appendChild(el("div",{style:{fontSize:"13px",opacity:"0.65",marginTop:"3px"}},[(t.escorts||[]).length>0?t.escorts.map(e=>`${e.name}（${e.dir==="round"?"往復":"片道"}）`).join("・"):"引率未記録"]));
+  const ms=el("div",{style:{display:"flex",gap:"10px",marginTop:"8px"}});
+  [[`${t.games.length}試合`,"rgba(255,255,255,0.8)"],[`${tw}勝`,"#6ee7b7"],[`${tl}敗`,"#fca5a5"],[`${td2}分`,"#fcd34d"]].forEach(([txt,c])=>
+    ms.appendChild(el("span",{style:{fontSize:"13px",color:c,fontWeight:"600"}},[txt])));
+  hdr.appendChild(ms);
+  wrap.appendChild(hdr);
+
+  const body=el("div",{style:S.body});
+  if(t.games.length===0){
+    body.appendChild(el("div",{style:S.emp},[el("div",{style:{fontSize:"44px",marginBottom:"10px"}},["🏀"]),el("div",{},["試合がまだありません"])]));
+  } else {
+    t.games.forEach(g=>{
+      const rb=RB[res(g)];
+      const card=el("div",{style:{...S.gc,cursor:"pointer"},onClick:()=>{selGame=g;sf={};if(g.stats){g.stats.forEach(s=>{sf[s.player_id]={playTime:s.play_time??0,points:s.points??0,rebounds:s.rebounds??0};});}view="gd";render();}});
+      card.appendChild(el("div",{style:{...S.bdg,background:rb.bg,color:rb.c}},[rb.t]));
+      const info=el("div",{style:{flex:"1"}});
+      info.appendChild(el("div",{style:{fontWeight:"700",fontSize:"15px",color:"#1f2937"}},[`vs ${g.opponent}`]));
+      if(g.memo) info.appendChild(el("div",{style:{fontSize:"12px",color:"#6b7280",marginTop:"3px",fontStyle:"italic"}},[`📝 ${g.memo}`]));
+      card.appendChild(info);
+      const right=el("div",{style:{textAlign:"right"}});
+      right.appendChild(el("div",{style:{fontSize:"18px",fontWeight:"900",color:"#0f2744"}},[`${g.our_score}–${g.their_score}`]));
+      if(isAdmin){
+        const btnRow=el("div",{style:{display:"flex",gap:"8px",marginTop:"4px",justifyContent:"flex-end"}});
+        btnRow.appendChild(el("button",{
+          style:{background:"none",border:"none",color:"#2563eb",fontSize:"11px",cursor:"pointer",padding:"0",fontWeight:"600"},
+          onClick:(e)=>{e.stopPropagation();gf={opponent:g.opponent,ourScore:String(g.our_score),theirScore:String(g.their_score),memo:g.memo||""};editGameId=g.id;ge="";view="eg";render();}
+        },["修正"]));
+        btnRow.appendChild(el("button",{
+          style:{background:"none",border:"none",color:"#ef4444",fontSize:"11px",cursor:"pointer",padding:"0"},
+          onClick:(e)=>{e.stopPropagation();deleteGame(g.id);}
+        },["削除"]));
+        right.appendChild(btnRow);
+      }
+      card.appendChild(right);
+      body.appendChild(card);
+    });
+  }
+  if(isAdmin){
+    body.appendChild(el("button",{
+      style:{width:"100%",background:"#fee2e2",color:"#dc2626",border:"none",borderRadius:"12px",padding:"13px",fontSize:"14px",fontWeight:"700",cursor:"pointer",marginTop:"16px",fontFamily:"inherit"},
+      onClick:()=>deleteTournament(t.id)
+    },["🗑 この大会を削除"]));
+  }
+  wrap.appendChild(body);
+  if(isAdmin) wrap.appendChild(el("button",{style:S.fab,onClick:()=>{view="ag";render();}},["＋"]));
+  return wrap;
+}
+
+// ── Add / Edit Game ───────────────────────────────────────────────────
+function buildAG(){
+  const t=tournaments.find(x=>x.id===sel);
+  const wrap=el("div",{});
+  wrap.appendChild(mkHdr("試合を追加",t?.name,true,()=>{view="td";render();}));
+  const body=el("div",{style:S.body});
+  if(ge) body.appendChild(el("div",{style:S.err},[`⚠ ${ge}`]));
+  body.appendChild(mkLabel("🆚 相手チーム *"));
+  body.appendChild(mkInput("○○ミニバスケットボール",gf.opponent,v=>{gf.opponent=v;}));
+  body.appendChild(mkLabel("スコア（自チーム – 相手） *"));
+  body.appendChild(mkScoreRow());
+  body.appendChild(mkLabel("📝 メモ（任意）"));
+  body.appendChild(mkInput("ひとことメモ",gf.memo,v=>{gf.memo=v;}));
+  body.appendChild(mkBtn("追加する",addGame));
+  body.appendChild(el("button",{style:S.bsc,onClick:()=>{view="td";ge="";render();}},["キャンセル"]));
+  wrap.appendChild(body);
+  return wrap;
+}
+function buildEG(){
+  const t=tournaments.find(x=>x.id===sel);
+  const wrap=el("div",{});
+  const cancelFn=()=>{gf={opponent:"",ourScore:"",theirScore:"",memo:""};editGameId=null;ge="";view="td";render();};
+  wrap.appendChild(mkHdr("✏️ 試合を修正",t?.name,true,cancelFn));
+  const body=el("div",{style:S.body});
+  if(ge) body.appendChild(el("div",{style:S.err},[`⚠ ${ge}`]));
+  body.appendChild(mkLabel("🆚 相手チーム *"));
+  body.appendChild(mkInput("○○ミニバスケットボール",gf.opponent,v=>{gf.opponent=v;}));
+  body.appendChild(mkLabel("スコア（自チーム – 相手） *"));
+  body.appendChild(mkScoreRow());
+  body.appendChild(mkLabel("📝 メモ（任意）"));
+  body.appendChild(mkInput("ひとことメモ",gf.memo,v=>{gf.memo=v;}));
+  body.appendChild(mkBtn("保存する",updateGame));
+  body.appendChild(el("button",{style:S.bsc,onClick:cancelFn},["キャンセル"]));
+  wrap.appendChild(body);
+  return wrap;
+}
+
+// ── Add / Edit Tournament ─────────────────────────────────────────────
+function buildAT(){
+  const wrap=el("div",{});
+  wrap.appendChild(mkHdr("大会を追加",null,true,()=>{view="list";render();}));
+  const body=el("div",{style:S.body});
+  if(te) body.appendChild(el("div",{style:S.err},[`⚠ ${te}`]));
+  body.appendChild(mkLabel("🏆 大会名 *"));
+  body.appendChild(mkInput("春季市内大会",tf.name,v=>{tf.name=v;}));
+  body.appendChild(mkLabel("📅 開催日 *"));
+  body.appendChild(mkInput("",tf.date,v=>{tf.date=v;},"date"));
+  body.appendChild(mkLabel("📍 会場（任意）"));
+  body.appendChild(mkInput("○○小学校体育館",tf.venue,v=>{tf.venue=v;}));
+  body.appendChild(mkLabel("🎽 参加学年"));
+  body.appendChild(mkGradePills(tf.grade,g=>{tf.grade=g;render();}));
+  body.appendChild(mkLabel("⚥ 男女区分"));
+  body.appendChild(mkGenderPills(tf.gender,g=>{tf.gender=g;render();}));
+  body.appendChild(mkLabel("👤 引率（最大5名）"));
+  mkEscortRows(body);
+  body.appendChild(mkBtn("追加する",addTournament));
+  body.appendChild(el("button",{style:S.bsc,onClick:()=>{view="list";te="";render();}},["キャンセル"]));
+  wrap.appendChild(body);
+  return wrap;
+}
+function buildET(){
+  const t=tournaments.find(x=>x.id===sel);
+  const wrap=el("div",{});
+  wrap.appendChild(mkHdr("✏️ 大会を修正",t?.name,true,()=>{te="";view="td";render();}));
+  const body=el("div",{style:S.body});
+  if(te) body.appendChild(el("div",{style:S.err},[`⚠ ${te}`]));
+  body.appendChild(mkLabel("🏆 大会名 *"));
+  body.appendChild(mkInput("春季市内大会",tf.name,v=>{tf.name=v;}));
+  body.appendChild(mkLabel("📅 開催日 *"));
+  body.appendChild(mkInput("",tf.date,v=>{tf.date=v;},"date"));
+  body.appendChild(mkLabel("📍 会場（任意）"));
+  body.appendChild(mkInput("○○小学校体育館",tf.venue,v=>{tf.venue=v;}));
+  body.appendChild(mkLabel("🎽 参加学年"));
+  body.appendChild(mkGradePills(tf.grade,g=>{tf.grade=g;render();}));
+  body.appendChild(mkLabel("⚥ 男女区分"));
+  body.appendChild(mkGenderPills(tf.gender,g=>{tf.gender=g;render();}));
+  body.appendChild(mkLabel("👤 引率（最大5名）"));
+  mkEscortRows(body);
+  body.appendChild(mkBtn("保存する",updateTournament));
+  body.appendChild(el("button",{style:S.bsc,onClick:()=>{te="";view="td";render();}},["キャンセル"]));
+  wrap.appendChild(body);
+  return wrap;
+}
+
+// ── Analysis ──────────────────────────────────────────────────────────
+function buildAnal(){
+  const filt=getFiltered();
+  const wrap=el("div",{});
+  const hdr=el("div",{style:S.hdr});
+  hdr.appendChild(el("button",{style:S.back,onClick:()=>{view="list";render();}},["← 戻る"]));
+  hdr.appendChild(el("div",{style:S.ht},["📊 分析"]));
+  const analYears=getYears();
+  const aytWrap=el("div",{style:S.ytWrap});
+  analYears.forEach(y=>{
+    const active=y===filterYr;
+    aytWrap.appendChild(el("button",{style:{...S.ytb,...(active?S.ytba:{})},onClick:()=>{filterYr=active?null:y;render();}},[`${y}年度`]));
+  });
+  hdr.appendChild(aytWrap);
+  const aFRow=el("div",{style:S.filterRow});
+  const aGrpGrade=el("div",{style:S.filterGroup});
+  GRADES.forEach(g=>{const active=g===filterGr;aGrpGrade.appendChild(el("button",{style:{...S.grfBtn,...(active?S.grfBtnA:{})},onClick:()=>{filterGr=active?null:g;render();}},[g]));});
+  aFRow.appendChild(aGrpGrade);
+  aFRow.appendChild(el("div",{style:S.filterDivider}));
+  const aGrpGen=el("div",{style:S.filterGroup});
+  GENDERS.forEach(g=>{const active=g===filterGen;aGrpGen.appendChild(el("button",{style:{...S.grfBtn,...(active?{background:g==="男子"?"#3b82f6":"#ec4899",color:"#fff",border:"1px solid transparent"}:{})},onClick:()=>{filterGen=active?null:g;render();}},[g]));});
+  aFRow.appendChild(aGrpGen);
+  hdr.appendChild(aFRow);
+  const tabs=[["opp","🆚 対戦相手"],["month","📅 月別"],["venue","📍 会場別"],["esc","👤 引率"]];
+  const tabRow=el("div",{style:{display:"flex",gap:"6px",marginTop:"12px",overflowX:"auto",scrollbarWidth:"none"}});
+  tabs.forEach(([key,label])=>{
+    const active=analTab===key;
+    tabRow.appendChild(el("button",{
+      style:{padding:"7px 14px",borderRadius:"20px",border:"none",background:active?"#fff":"rgba(255,255,255,0.15)",color:active?"#0f2744":"rgba(255,255,255,0.8)",fontSize:"13px",fontWeight:active?"700":"500",cursor:"pointer",fontFamily:"inherit",flexShrink:"0",whiteSpace:"nowrap"},
+      onClick:()=>{analTab=key;render();}
+    },[label]));
+  });
+  hdr.appendChild(tabRow);
+  wrap.appendChild(hdr);
+  const body=el("div",{style:S.body});
+
+  if(analTab==="opp"){
+    const oppMap={};
+    filt.forEach(t=>{(t.games||[]).forEach(g=>{if(!oppMap[g.opponent])oppMap[g.opponent]=[];oppMap[g.opponent].push({...g,tDate:t.date,tName:t.name,tGrade:t.grade,tGender:t.gender||"男子"});});});
+    const oppList=Object.entries(oppMap).sort((a,b)=>b[1].length-a[1].length);
+    if(oppList.length===0){body.appendChild(el("div",{style:S.emp},["データがありません"]));}
+    else oppList.forEach(([opp,games])=>{
+      const w=games.filter(g=>res(g)==="win").length,l=games.filter(g=>res(g)==="lose").length,d=games.filter(g=>res(g)==="draw").length;
+      const card=el("div",{style:{background:"#fff",borderRadius:"14px",marginBottom:"14px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",overflow:"hidden"}});
+      const hd=el("div",{style:{background:"#f8fafc",padding:"10px 14px",borderBottom:"1px solid #f1f5f9",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"6px"}});
+      hd.appendChild(el("span",{style:{fontWeight:"800",fontSize:"15px",color:"#0f2744"}},[`vs ${opp}`]));
+      const badges=el("div",{style:{display:"flex",gap:"8px",alignItems:"center"}});
+      [[`${games.length}試合`,"#6b7280"],[`${w}勝`,"#059669"],[`${l}敗`,"#dc2626"]].forEach(([t2,c])=>badges.appendChild(el("span",{style:{fontSize:"13px",color:c,fontWeight:"700"}},[t2])));
+      if(d>0) badges.appendChild(el("span",{style:{fontSize:"13px",color:"#d97706",fontWeight:"700"}},[`${d}分`]));
+      hd.appendChild(badges);card.appendChild(hd);
+      games.forEach(g=>{
+        const rb=RB[res(g)];const gc2=g.tGender==="男子"?"#1d4ed8":"#be185d";const gb2=g.tGender==="男子"?"#dbeafe":"#fce7f3";
+        const row=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",padding:"9px 14px",borderBottom:"1px solid #f9fafb"}});
+        row.appendChild(el("span",{style:{width:"28px",height:"28px",borderRadius:"7px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",fontWeight:"900",flexShrink:"0",background:rb.bg,color:rb.c}},[rb.t]));
+        const info2=el("div",{style:{flex:"1",minWidth:"0"}});
+        info2.appendChild(el("div",{style:{fontSize:"12px",color:"#6b7280"}},[`${fmtD(g.tDate)}　${g.tName}`]));
+        const tagRow=el("div",{style:{display:"flex",gap:"4px",marginTop:"2px",flexWrap:"wrap"}});
+        tagRow.appendChild(el("span",{style:{fontSize:"10px",fontWeight:"700",padding:"1px 6px",borderRadius:"4px",background:"#dbeafe",color:"#1d4ed8"}},[g.tGrade]));
+        tagRow.appendChild(el("span",{style:{fontSize:"10px",fontWeight:"700",padding:"1px 6px",borderRadius:"4px",background:gb2,color:gc2}},[g.tGender]));
+        info2.appendChild(tagRow);row.appendChild(info2);
+        row.appendChild(el("span",{style:{fontSize:"16px",fontWeight:"900",color:"#0f2744",flexShrink:"0"}},[`${g.our_score}–${g.their_score}`]));
+        card.appendChild(row);
+      });
+      body.appendChild(card);
+    });
+  }
+
+  if(analTab==="month"){
+    const monthMap={};
+    filt.forEach(t=>{const d=new Date(t.date);const key=`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}`;if(!monthMap[key])monthMap[key]={tc:0,games:0,tournaments:[]};monthMap[key].tc++;monthMap[key].games+=(t.games||[]).length;monthMap[key].tournaments.push(t);});
+    const allKeys=Object.keys(monthMap);
+    if(allKeys.length===0){body.appendChild(el("div",{style:S.emp},["データがありません"]));}
+    else{
+      const sorted=[...allKeys].sort();const[minY,minM]=sorted[0].split("/").map(Number);const[maxY,maxM]=sorted[sorted.length-1].split("/").map(Number);
+      const calKeys=[];let cy=minY,cm=minM;
+      while(cy<maxY||(cy===maxY&&cm<=maxM)){calKeys.push(`${cy}/${String(cm).padStart(2,"0")}`);cm++;if(cm>12){cm=1;cy++;}}
+      calKeys.reverse();
+      const pad=n=>n>=10?`${n}`:`\u2007${n}`;
+      const mCard=el("div",{style:{background:"#fff",borderRadius:"14px",marginBottom:"14px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",overflow:"hidden"}});
+      calKeys.forEach(ym=>{
+        const[yyyy,mm]=ym.split("/");const label=`${String(yyyy).slice(2)}年${parseInt(mm)}月`;
+        const v=monthMap[ym]||{tc:0,games:0,tournaments:[]};const isEmpty=v.tc===0;const isSelected=analMonthSel===ym;
+        const row2=el("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"11px 16px",borderBottom:"1px solid #f1f5f9",cursor:isEmpty?"default":"pointer",background:isSelected?"#eff6ff":"transparent"},onClick:isEmpty?null:()=>{analMonthSel=isSelected?null:ym;render();}});
+        const labelEl=el("div",{style:{display:"flex",alignItems:"center",gap:"6px"}});
+        labelEl.appendChild(el("span",{style:{fontSize:"14px",fontWeight:"700",color:isEmpty?"#cbd5e1":"#1f2937"}},[label]));
+        if(!isEmpty&&!isSelected)labelEl.appendChild(el("span",{style:{fontSize:"11px",color:"#94a3b8"}},["▶"]));
+        if(isSelected)labelEl.appendChild(el("span",{style:{fontSize:"11px",color:"#3b82f6",fontWeight:"600"}},["▼"]));
+        row2.appendChild(labelEl);
+        const nums=el("div",{style:{display:"flex",gap:"14px"}});
+        nums.appendChild(el("span",{style:{fontSize:"13px",color:isEmpty?"#cbd5e1":"#6b7280",fontFamily:"monospace,sans-serif"}},[`🏆 ${pad(v.tc)} 大会`]));
+        nums.appendChild(el("span",{style:{fontSize:"13px",fontWeight:isEmpty?"400":"700",color:isEmpty?"#cbd5e1":"#0f2744",fontFamily:"monospace,sans-serif"}},[`🏀 ${pad(v.games)} 試合`]));
+        row2.appendChild(nums);mCard.appendChild(row2);
+        if(isSelected&&!isEmpty){
+          const detail=el("div",{style:{background:"#f8fafc",padding:"10px 14px",borderBottom:"1px solid #f1f5f9"}});
+          v.tournaments.forEach((t2,ti)=>{
+            const tGender2=t2.gender||"男子";const gc3=tGender2==="男子"?"#1d4ed8":"#be185d";const gb3=tGender2==="男子"?"#dbeafe":"#fce7f3";
+            const tw2=t2.games.filter(g=>res(g)==="win").length;const tl2=t2.games.filter(g=>res(g)==="lose").length;
+            const tBlock=el("div",{style:{marginBottom:ti<v.tournaments.length-1?"12px":"0"}});
+            const tTop=el("div",{style:{display:"flex",alignItems:"center",gap:"5px",flexWrap:"wrap",marginBottom:"3px"}});
+            tTop.appendChild(el("span",{style:{background:"#dbeafe",color:"#1d4ed8",fontSize:"11px",fontWeight:"700",padding:"2px 7px",borderRadius:"5px"}},[t2.grade]));
+            tTop.appendChild(el("span",{style:{background:gb3,color:gc3,fontSize:"11px",fontWeight:"700",padding:"2px 7px",borderRadius:"5px"}},[tGender2]));
+            tTop.appendChild(el("span",{style:{fontWeight:"700",fontSize:"14px",color:"#0f2744"}},[t2.name]));
+            tBlock.appendChild(tTop);
+            const tMeta=el("div",{style:{display:"flex",gap:"8px",fontSize:"12px",marginBottom:"6px",flexWrap:"wrap",alignItems:"center"}});
+            [[`${t2.games.length}試合`,"#6b7280"],[`${tw2}勝`,"#059669"],[`${tl2}敗`,"#dc2626"]].forEach(([txt,c])=>tMeta.appendChild(el("span",{style:{color:c,fontWeight:"700"}},[txt])));
+            if(t2.venue) tMeta.appendChild(el("span",{style:{color:"#6b7280"}},[`📍${t2.venue}`]));
+            tBlock.appendChild(tMeta);
+            t2.games.forEach(g=>{
+              const rb=RB[res(g)];
+              const gRow=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",padding:"5px 0",borderTop:"1px solid #f1f5f9"}});
+              gRow.appendChild(el("span",{style:{width:"26px",height:"26px",borderRadius:"6px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",fontWeight:"900",flexShrink:"0",background:rb.bg,color:rb.c}},[rb.t]));
+              gRow.appendChild(el("span",{style:{flex:"1",fontSize:"13px",color:"#374151"}},[`vs ${g.opponent}`]));
+              gRow.appendChild(el("span",{style:{fontSize:"14px",fontWeight:"900",color:"#0f2744",flexShrink:"0"}},[`${g.our_score}–${g.their_score}`]));
+              tBlock.appendChild(gRow);
+            });
+            detail.appendChild(tBlock);
+          });
+          mCard.appendChild(detail);
+        }
+      });
+      body.appendChild(mCard);
+    }
+  }
+
+  if(analTab==="venue"){
+    const venueMap={};
+    filt.forEach(t=>{const vk=t.venue||"（未記録）";if(!venueMap[vk])venueMap[vk]={tc:0,games:0,w:0,l:0,d:0,tournaments:[]};venueMap[vk].tc++;venueMap[vk].games+=(t.games||[]).length;const tw2=t.games.filter(g=>res(g)==="win").length;const tl2=t.games.filter(g=>res(g)==="lose").length;const td3=t.games.filter(g=>res(g)==="draw").length;venueMap[vk].w+=tw2;venueMap[vk].l+=tl2;venueMap[vk].d+=td3;venueMap[vk].tournaments.push(t);});
+    const venueList=Object.entries(venueMap).sort((a,b)=>b[1].games-a[1].games);
+    if(venueList.length===0){body.appendChild(el("div",{style:S.emp},["データがありません"]));}
+    else venueList.forEach(([venue,v])=>{
+      const isSelected=analVenueSel===venue;
+      const card=el("div",{style:{background:"#fff",borderRadius:"14px",marginBottom:"12px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",overflow:"hidden"}});
+      const hd=el("div",{style:{padding:"12px 14px",background:isSelected?"#eff6ff":"#f8fafc",borderBottom:"1px solid #f1f5f9",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"},onClick:()=>{analVenueSel=isSelected?null:venue;render();}});
+      const left=el("div",{});
+      left.appendChild(el("div",{style:{fontWeight:"800",fontSize:"14px",color:"#0f2744"}},[`📍 ${venue}`]));
+      const nums2=el("div",{style:{display:"flex",gap:"10px",marginTop:"3px"}});
+      [[`${v.games}試合`,"#6b7280"],[`${v.w}勝`,"#059669"],[`${v.l}敗`,"#dc2626"]].forEach(([txt,c])=>nums2.appendChild(el("span",{style:{fontSize:"12px",color:c,fontWeight:"600"}},[txt])));
+      left.appendChild(nums2);hd.appendChild(left);
+      hd.appendChild(el("span",{style:{fontSize:"14px",color:"#94a3b8"}},[ isSelected?"▼":"▶"]));
+      card.appendChild(hd);
+      if(isSelected){
+        const det=el("div",{style:{padding:"10px 14px"}});
+        v.tournaments.forEach(t2=>{
+          const tw3=t2.games.filter(g=>res(g)==="win").length,tl3=t2.games.filter(g=>res(g)==="lose").length;
+          const tRow=el("div",{style:{borderBottom:"1px solid #f1f5f9",paddingBottom:"8px",marginBottom:"8px"}});
+          tRow.appendChild(el("div",{style:{fontWeight:"700",fontSize:"13px",color:"#374151",marginBottom:"2px"}},[t2.name]));
+          const tm=el("div",{style:{display:"flex",gap:"8px",fontSize:"12px"}});
+          [[`${t2.games.length}試合`,"#6b7280"],[`${tw3}勝`,"#059669"],[`${tl3}敗`,"#dc2626"]].forEach(([txt,c])=>tm.appendChild(el("span",{style:{color:c}},[txt])));
+          tRow.appendChild(tm);det.appendChild(tRow);
+        });
+        card.appendChild(det);
+      }
+      body.appendChild(card);
+    });
+  }
+
+  if(analTab==="esc"){
+    const escList=getEscSummary(filt);
+    if(escList.length===0){body.appendChild(el("div",{style:S.emp},["データがありません"]));}
+    else{
+      const card=el("div",{style:{background:"#fff",borderRadius:"14px",marginBottom:"14px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",overflow:"hidden"}});
+      escList.forEach(([name,cnt],i)=>{
+        const isSelected=analEscSel===name;
+        const row2=el("div",{style:{padding:"12px 14px",borderBottom:"1px solid #f9fafb",cursor:"pointer",background:isSelected?"#eff6ff":"transparent",display:"flex",alignItems:"center",justifyContent:"space-between"},onClick:()=>{analEscSel=isSelected?null:name;render();}});
+        const left=el("div",{style:{display:"flex",alignItems:"center",gap:"10px"}});
+        left.appendChild(el("span",{style:{width:"24px",height:"24px",borderRadius:"50%",background:"#0f2744",color:"#fff",fontSize:"12px",fontWeight:"800",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:"0"}},[String(i+1)]));
+        left.appendChild(el("span",{style:{fontWeight:"700",fontSize:"15px",color:"#1f2937"}},[name]));
+        row2.appendChild(left);
+        const right2=el("div",{style:{display:"flex",alignItems:"center",gap:"10px"}});
+        right2.appendChild(el("span",{style:{fontSize:"16px",fontWeight:"900",color:"#0f2744"}},[`${cnt}回`]));
+        right2.appendChild(el("span",{style:{fontSize:"13px",color:"#94a3b8"}},[isSelected?"▼":"▶"]));
+        row2.appendChild(right2);card.appendChild(row2);
+        if(isSelected){
+          const det=el("div",{style:{background:"#f8fafc",padding:"10px 14px",borderBottom:"1px solid #f1f5f9"}});
+          filt.forEach(t2=>{
+            const myEsc=(t2.escorts||[]).find(e=>e.name===name);
+            if(!myEsc) return;
+            const dRow=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",padding:"6px 0",borderBottom:"1px solid #f1f5f9"}});
+            dRow.appendChild(el("span",{style:{fontSize:"13px",color:"#374151",flex:"1"}},[t2.name]));
+            dRow.appendChild(el("span",{style:{fontSize:"12px",color:"#6b7280"}},[`${fmtD(t2.date)}　${myEsc.dir==="round"?"往復":"片道"}`]));
+            det.appendChild(dRow);
+          });
+          card.appendChild(det);
+        }
+      });
+      body.appendChild(card);
+    }
+  }
+
+  wrap.appendChild(body);
+  return wrap;
+}
+
+// ── Players ───────────────────────────────────────────────────────────
+function buildPlayers(){
+  const wrap=el("div",{});
+  wrap.appendChild(mkHdr("👥 選手管理",currentTeam?.name,true,()=>{view="list";render();}));
+  const body=el("div",{style:S.body});
+
+  // タブ
+  const tabRow=el("div",{style:{display:"flex",gap:"8px",marginBottom:"16px"}});
+  [["list","一覧"],[editPlayerId?"edit":"add",editPlayerId?"編集":"追加"]].forEach(([key,label])=>{
+    const active=players_tab===key;
+    tabRow.appendChild(el("button",{
+      style:{flex:"1",padding:"10px",borderRadius:"10px",border:`1.5px solid ${active?"#0f2744":"#e5e7eb"}`,background:active?"#0f2744":"#f9fafb",fontSize:"14px",fontWeight:"600",cursor:"pointer",color:active?"#fff":"#6b7280",fontFamily:"inherit"},
+      onClick:()=>{players_tab=key;render();}
+    },[label]));
+  });
+  body.appendChild(tabRow);
+
+  if(players_tab==="list"){
+    const sorted=sortPlayers(players);
+    if(sorted.length===0){
+      body.appendChild(el("div",{style:S.emp},["選手が登録されていません"]));
+    } else {
+      sorted.forEach(p=>{
+        const grade=calcGrade(p.enroll_year);
+        const card=el("div",{style:{background:"#fff",borderRadius:"12px",padding:"12px 14px",marginBottom:"10px",display:"flex",alignItems:"center",gap:"12px",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}});
+        const avatar=el("div",{style:{width:"40px",height:"40px",borderRadius:"50%",background:p.gender==="女子"?"#fce7f3":"#dbeafe",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px",flexShrink:"0"}},[p.gender==="女子"?"👧":"👦"]);
+        card.appendChild(avatar);
+        const info2=el("div",{style:{flex:"1",minWidth:"0"}});
+        const nameRow=el("div",{style:{display:"flex",alignItems:"baseline",gap:"6px"}});
+        nameRow.appendChild(el("span",{style:{fontWeight:"700",fontSize:"15px",color:"#0f2744"}},[p.name]));
+        if(p.furigana) nameRow.appendChild(el("span",{style:{fontSize:"10px",color:"#b0b8c4"}},[p.furigana]));
+        info2.appendChild(nameRow);
+        const sub=el("div",{style:{fontSize:"12px",color:"#94a3b8",marginTop:"2px"}});
+        sub.appendChild(el("span",{},[grade?`${grade}年生`:"卒業"]));
+        info2.appendChild(sub);
+        card.appendChild(info2);
+        if(isAdmin){
+          const btnRow=el("div",{style:{display:"flex",gap:"8px",flexShrink:"0"}});
+          btnRow.appendChild(el("button",{
+            style:{background:"none",border:"none",color:"#2563eb",fontSize:"12px",cursor:"pointer",padding:"0",fontWeight:"600"},
+            onClick:()=>{editPlayerId=p.id;pf={name:p.name,furigana:p.furigana||"",joinOrder:p.join_order!=null?String(p.join_order):"",enrollYear:String(p.enroll_year),gender:p.gender};pe="";players_tab="edit";render();}
+          },["編集"]));
+          btnRow.appendChild(el("button",{
+            style:{background:"none",border:"none",color:"#ef4444",fontSize:"12px",cursor:"pointer",padding:"0"},
+            onClick:()=>deletePlayer(p.id)
+          },["削除"]));
+          card.appendChild(btnRow);
+        }
+        body.appendChild(card);
+      });
+    }
+  } else {
+    // Add / Edit form
+    if(pe) body.appendChild(el("div",{style:S.err},[`⚠ ${pe}`]));
+    body.appendChild(mkLabel("👤 名前 *"));
+    body.appendChild(mkInput("山田 太郎",pf.name,v=>{pf.name=v;}));
+    body.appendChild(mkLabel("ふりがな（任意）"));
+    body.appendChild(mkInput("やまだ たろう",pf.furigana,v=>{pf.furigana=v;}));
+    body.appendChild(mkLabel("入学年度 *（例：2022）"));
+    body.appendChild(mkInput("2022",pf.enrollYear,v=>{pf.enrollYear=v;},"number"));
+    body.appendChild(mkLabel("入部順（任意）"));
+    body.appendChild(mkInput("1",pf.joinOrder,v=>{pf.joinOrder=v;},"number"));
+    body.appendChild(mkLabel("⚥ 性別"));
+    body.appendChild(mkGenderPills(pf.gender,g=>{pf.gender=g;render();}));
+    body.appendChild(mkBtn(editPlayerId?"保存する":"追加する",editPlayerId?updatePlayer:addPlayer));
+    body.appendChild(el("button",{
+      style:S.bsc,
+      onClick:()=>{pf={name:"",furigana:"",joinOrder:"",enrollYear:String(new Date().getFullYear()),gender:"男子"};pe="";editPlayerId=null;players_tab="list";render();}
+    },["キャンセル"]));
+  }
+
+  wrap.appendChild(body);
+  return wrap;
+}
+
+// ── Game Detail ───────────────────────────────────────────────────────
+function buildGD(){
+  const t=tournaments.find(x=>x.id===sel);
+  const g=selGame;
+  if(!t||!g){view="td";render();return el("div",{});}
+  const rb=RB[res(g)];
+  const wrap=el("div",{});
+  wrap.appendChild(mkHdr(`vs ${g.opponent}`,t.name,true,()=>{view="td";render();}));
+  const body=el("div",{style:S.body});
+
+  // スコアカード
+  const sc=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"20px",marginBottom:"12px",textAlign:"center",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
+  sc.appendChild(el("div",{style:{display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",marginBottom:"8px"}},[
+    el("span",{style:{width:"32px",height:"32px",borderRadius:"8px",background:rb.bg,color:rb.c,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",fontWeight:"900"}},[rb.t]),
+    el("span",{style:{fontSize:"32px",fontWeight:"900",color:"#0f2744"}},[`${g.our_score}–${g.their_score}`])
+  ]));
+  if(g.memo) sc.appendChild(el("div",{style:{fontSize:"13px",color:"#6b7280",fontStyle:"italic"}},[`📝 ${g.memo}`]));
+  body.appendChild(sc);
+
+  // スタッツ
+  const stats=(g.stats||[]);
+  if(stats.length>0){
+    const tbl=el("div",{style:{background:"#fff",borderRadius:"14px",marginBottom:"12px",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
+    const thead=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 44px 44px 44px",gap:"0",padding:"8px 14px",borderBottom:"1px solid #f1f5f9",background:"#f8fafc"}});
+    ["選手","分","点","Reb"].forEach((h,i)=>thead.appendChild(el("span",{style:{fontSize:"11px",fontWeight:"700",color:"#6b7280",textAlign:i>0?"center":"left"}},[h])));
+    tbl.appendChild(thead);
+    const sortedStats=[...stats].sort((a,b)=>{
+      const pa=players.find(x=>x.id===a.player_id),pb=players.find(x=>x.id===b.player_id);
+      const ga2=pa?calcGrade(pa.enroll_year)??0:0,gb2=pb?calcGrade(pb.enroll_year)??0:0;
+      if(gb2!==ga2) return gb2-ga2;
+      return (pa?.join_order??9999)-(pb?.join_order??9999);
+    });
+    sortedStats.forEach((s,i)=>{
+      const p=players.find(x=>x.id===s.player_id);
+      const row2=el("div",{style:{display:"grid",gridTemplateColumns:"1fr 44px 44px 44px",gap:"0",padding:"10px 14px",borderBottom:i<stats.length-1?"1px solid #f9fafb":"none",alignItems:"center"}});
+      const nameWrap=el("div",{style:{display:"flex",alignItems:"baseline",gap:"5px",minWidth:"0"}});
+      nameWrap.appendChild(el("span",{style:{fontSize:"13px",fontWeight:"600",color:"#1f2937",whiteSpace:"nowrap"}},[p?p.name:"不明"]));
+      if(p?.furigana) nameWrap.appendChild(el("span",{style:{fontSize:"10px",color:"#b0b8c4",fontWeight:"400",whiteSpace:"nowrap"}},[p.furigana]));
+      row2.appendChild(nameWrap);
+      [s.play_time,s.points,s.rebounds].forEach(v=>row2.appendChild(el("span",{style:{fontSize:"14px",fontWeight:"700",color:"#0f2744",textAlign:"center"}},[String(v??0)])));
+      tbl.appendChild(row2);
+    });
+    body.appendChild(tbl);
+  }
+
+  if(isAdmin){
+    body.appendChild(el("button",{
+      style:{width:"100%",background:"#f3f4f6",color:"#374151",border:"1.5px solid #d1d5db",borderRadius:"12px",padding:"13px",fontSize:"14px",fontWeight:"600",cursor:"pointer",fontFamily:"inherit"},
+      onClick:()=>{sf={};(g.stats||[]).forEach(s=>{sf[s.player_id]={playTime:s.play_time??0,points:s.points??0,rebounds:s.rebounds??0};});view="gs";render();}
+    },["✏️ スタッツを入力"]));
+  }
+  body.appendChild(el("div",{style:{height:"20px"}}));
+  wrap.appendChild(body);
+  return wrap;
+}
+
+// ── Game Stats Input ──────────────────────────────────────────────────
+function buildGS(){
+  const t=tournaments.find(x=>x.id===sel);
+  const g=selGame;
+  if(!t||!g){view="td";render();return el("div",{});}
+  const wrap=el("div",{});
+  wrap.appendChild(mkHdr("✏️ スタッツ入力",`vs ${g.opponent}`,true,()=>{view="gd";render();}));
+  const body=el("div",{style:S.body});
+  const tGender=t.gender||"男子";
+  const activePlayers=sortPlayers(players.filter(p=>{const grade=calcGrade(p.enroll_year);return p.gender===tGender&&grade!==null;}));
+  if(activePlayers.length===0){
+    body.appendChild(el("div",{style:S.emp},["対象選手がいません（選手マスタを確認してください）"]));
+  } else {
+    activePlayers.forEach(p=>{
+      if(!sf[p.id]) sf[p.id]={playTime:0,points:0,rebounds:0};
+      const s=sf[p.id];
+      const card=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"14px",marginBottom:"12px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
+      const nameRow=el("div",{style:{display:"flex",alignItems:"baseline",gap:"6px",marginBottom:"10px"}});
+      nameRow.appendChild(el("span",{style:{fontWeight:"700",fontSize:"15px",color:"#0f2744"}},[p.name]));
+      if(p.furigana) nameRow.appendChild(el("span",{style:{fontSize:"10px",color:"#b0b8c4",fontWeight:"400"}},[p.furigana]));
+      nameRow.appendChild(el("span",{style:{fontSize:"12px",color:"#6b7280",marginLeft:"auto"}},[gradeLabel(p.enroll_year)]));
+      card.appendChild(nameRow);
+      const grid=el("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px"}});
+      [["出場(分)","playTime"],["得点","points"],["Reb","rebounds"]].forEach(([label,key])=>{
+        const cell=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",gap:"4px"}});
+        cell.appendChild(el("span",{style:{fontSize:"11px",color:"#6b7280",fontWeight:"600"}},[label]));
+        const numWrap=el("div",{style:{display:"flex",alignItems:"center",gap:"4px"}});
+        const minus=el("button",{style:{width:"28px",height:"28px",borderRadius:"6px",border:"1.5px solid #e5e7eb",background:"#f9fafb",fontSize:"16px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#6b7280",flexShrink:"0"},
+          onClick:()=>{sf[p.id][key]=Math.max(0,(sf[p.id][key]||0)-1);render();}},["−"]);
+        const val=el("span",{style:{width:"32px",textAlign:"center",fontSize:"18px",fontWeight:"900",color:"#0f2744"}},[String(s[key]||0)]);
+        const plus=el("button",{style:{width:"28px",height:"28px",borderRadius:"6px",border:"1.5px solid #e5e7eb",background:"#f9fafb",fontSize:"16px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#6b7280",flexShrink:"0"},
+          onClick:()=>{sf[p.id][key]=(sf[p.id][key]||0)+1;render();}},["＋"]);
+        numWrap.appendChild(minus);numWrap.appendChild(val);numWrap.appendChild(plus);
+        cell.appendChild(numWrap);grid.appendChild(cell);
+      });
+      card.appendChild(grid);body.appendChild(card);
+    });
+  }
+  body.appendChild(el("div",{style:{height:"8px"}}));
+  body.appendChild(mkBtn("保存する",saveStats));
+  body.appendChild(el("button",{style:S.bsc,onClick:()=>{view="gd";render();}},["キャンセル"]));
+  body.appendChild(el("div",{style:{height:"20px"}}));
+  wrap.appendChild(body);
+  return wrap;
+}
+
+// ── Settings ──────────────────────────────────────────────────────────
+function buildSettings(){
+  const wrap=el("div",{});
+  wrap.appendChild(mkHdr("⚙ 設定",currentTeam?.name,true,()=>{view="list";render();}));
+  const body=el("div",{style:S.body});
+
+  // チーム情報
+  body.appendChild(el("div",{style:{fontSize:"13px",fontWeight:"700",color:"#6b7280",marginBottom:"10px"}},["チーム情報"]));
+  const infoCard=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"16px",marginBottom:"20px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
+  infoCard.appendChild(el("div",{style:{fontWeight:"800",fontSize:"17px",color:"#0f2744",marginBottom:"4px"}},[currentTeam?.name||""]));
+  infoCard.appendChild(el("div",{style:{fontSize:"13px",color:"#94a3b8"}},[isAdmin?"あなたは管理者です":"あなたはメンバーです"]));
+  body.appendChild(infoCard);
+
+  // 招待リンク（adminのみ）
+  if(isAdmin){
+    body.appendChild(el("div",{style:{fontSize:"13px",fontWeight:"700",color:"#6b7280",marginBottom:"10px"}},["メンバーを招待"]));
+    const invCard=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"16px",marginBottom:"20px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
+    invCard.appendChild(el("div",{style:{fontSize:"13px",color:"#374151",marginBottom:"12px"}},["下のリンクを共有するとチームに参加できます。リンクは無期限に有効です。"]));
+    const linkBox=el("div",{style:{background:"#f8fafc",borderRadius:"10px",padding:"10px 12px",fontSize:"12px",color:"#6b7280",wordBreak:"break-all",marginBottom:"12px",border:"1px solid #e5e7eb"}},[getInviteLink()]);
+    invCard.appendChild(linkBox);
+    invCard.appendChild(mkBtn("📋 招待リンクをコピー",copyInviteLink));
+    body.appendChild(invCard);
+  }
+
+  // チーム切り替え
+  body.appendChild(el("div",{style:{fontSize:"13px",fontWeight:"700",color:"#6b7280",marginBottom:"10px"}},["チームを切り替え / 追加"]));
+  body.appendChild(el("button",{
+    style:{width:"100%",background:"#fff",color:"#0f2744",border:"1.5px solid #e5e7eb",borderRadius:"12px",padding:"13px",fontSize:"15px",fontWeight:"600",cursor:"pointer",fontFamily:"inherit",marginBottom:"20px"},
+    onClick:()=>{currentTeam=null;view="team_select";render();}
+  },["🔄 チーム選択画面へ"]));
+
+  // ログアウト
+  body.appendChild(el("div",{style:{fontSize:"13px",fontWeight:"700",color:"#6b7280",marginBottom:"10px"}},["アカウント"]));
+  body.appendChild(el("div",{style:{background:"#fff",borderRadius:"14px",padding:"16px",marginBottom:"12px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}},[ el("div",{style:{fontSize:"13px",color:"#94a3b8",marginBottom:"8px"}},[user?.email||""]), mkBtn("ログアウト",logout,{background:"#f3f4f6",color:"#374151"}) ]));
+
+  wrap.appendChild(body);
+  return wrap;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────
+checkUrlForInvite();
+render();
+
+</script>
+
+<!-- PWA Install Banner -->
+<div id="pwa-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;background:#0f2744;color:#fff;padding:14px 16px 20px;box-shadow:0 -4px 16px rgba(0,0,0,0.25);flex-direction:column;gap:8px;max-width:430px;margin:0 auto;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:28px;">📲</span>
+      <div>
+        <div style="font-size:14px;font-weight:800;margin-bottom:2px;">ホーム画面に追加しませんか？</div>
+        <div style="font-size:12px;opacity:0.75;">アプリのように快適に使えます</div>
+      </div>
+    </div>
+    <button onclick="dismissPwaBanner()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;font-family:inherit;flex-shrink:0;">閉じる</button>
+  </div>
+  <div id="pwa-ios-msg" style="background:rgba(255,255,255,0.1);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.7;display:none;">
+    📋 画面下の「<strong>…</strong>」→「<strong>共有</strong>」→「<strong>ホーム画面に追加</strong>」を選択
+  </div>
+  <button id="pwa-android-btn" onclick="triggerAndroidInstall()" style="display:none;background:#fcd34d;color:#0f2744;border:none;border-radius:10px;padding:11px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;">
+    ホーム画面に追加する
+  </button>
+</div>
+<script>
+(function(){
+  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isAndroid=/android/i.test(navigator.userAgent);
+  if(isIOS){const e=document.getElementById("pwa-ios-msg");if(e)e.style.display="block";}
+  if(isAndroid){const e=document.getElementById("pwa-android-btn");if(e)e.style.display="block";}
+})();
+</script>
+</body>
+</html>
