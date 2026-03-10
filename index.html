@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
-<title>minibasket-log</title>
+<title>ミニバスログ | MiniBasketLog</title>
 <link rel="manifest" href="/manifest.json"/>
 <meta name="theme-color" content="#0f2744"/>
 <meta name="mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="minibasket-log"/>
+<meta name="apple-mobile-web-app-title" content="ミニバスログ"/>
 <link rel="apple-touch-icon" href="/icon-192.png"/>
 <script>
   if('serviceWorker' in navigator){
@@ -597,22 +597,54 @@ function buildLoading(){
 
 // ── Login ─────────────────────────────────────────────────────────────
 function buildLogin(){
-  return el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",gap:"24px",padding:"40px 20px"}},[
-    el("div",{style:{fontSize:"52px"}},["🏀"]),
-    el("div",{style:{fontSize:"26px",fontWeight:"800",color:"#0f2744"}},["minibasket-log"]),
-    el("div",{style:{fontSize:"14px",color:"#6b7280",textAlign:"center"}},["ミニバスケットボールチームの戦績管理アプリ"]),
-    el("button",{
-      style:{background:"#0f2744",color:"#fff",border:"none",borderRadius:"12px",padding:"14px 32px",fontSize:"16px",fontWeight:"700",cursor:"pointer",display:"flex",alignItems:"center",gap:"8px"},
-      onClick:login
-    },["Googleでログイン"])
-  ]);
+  const wrap=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",background:"#f1f5f9",minHeight:"100vh",padding:"0 0 60px"}});
+
+  // ヒーローセクション
+  const hero=el("div",{style:{width:"100%",background:"#0f2744",padding:"48px 24px 40px",display:"flex",flexDirection:"column",alignItems:"center",gap:"16px"}});
+  hero.appendChild(el("div",{style:{fontSize:"56px"}},["🏀"]));
+  hero.appendChild(el("div",{style:{fontSize:"28px",fontWeight:"800",color:"#fff",textAlign:"center"}},["ミニバスログ"]));
+  hero.appendChild(el("div",{style:{fontSize:"13px",color:"rgba(255,255,255,0.65)",textAlign:"center",letterSpacing:"1px"}},["MiniBasketLog"]));
+  hero.appendChild(el("div",{style:{fontSize:"15px",color:"rgba(255,255,255,0.8)",textAlign:"center",marginTop:"4px"}},["ミニバスケットボールチームの戦績管理アプリ"]));
+  wrap.appendChild(hero);
+
+  // 機能紹介カード
+  const features=el("div",{style:{width:"100%",maxWidth:"400px",padding:"24px 16px 0"}});
+  [
+    ["🏆","大会・試合の戦績管理","大会ごとに試合結果をまとめて記録。勝敗・スコアを一覧で確認できます。"],
+    ["👥","チームで共有","招待リンクでメンバーを招待。管理者・メンバーの権限管理もかんたんです。"],
+    ["📊","分析機能","対戦相手別・月別・会場別など多角的に戦績を分析できます。"],
+  ].forEach(([icon,title,desc])=>{
+    const card=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"16px",marginBottom:"12px",display:"flex",gap:"14px",alignItems:"flex-start",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
+    card.appendChild(el("div",{style:{fontSize:"28px",flexShrink:"0"}},[icon]));
+    const txt=el("div",{});
+    txt.appendChild(el("div",{style:{fontWeight:"700",fontSize:"15px",color:"#0f2744",marginBottom:"4px"}},[title]));
+    txt.appendChild(el("div",{style:{fontSize:"13px",color:"#6b7280",lineHeight:"1.6"}},[desc]));
+    card.appendChild(txt);
+    features.appendChild(card);
+  });
+  wrap.appendChild(features);
+
+  // ログインボタン
+  const loginArea=el("div",{style:{width:"100%",maxWidth:"400px",padding:"8px 16px 0"}});
+  loginArea.appendChild(el("button",{
+    style:{width:"100%",background:"#0f2744",color:"#fff",border:"none",borderRadius:"12px",padding:"16px",fontSize:"16px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit"},
+    onClick:login
+  },["Googleでログイン"]));
+
+  // プライバシーポリシーリンク
+  loginArea.appendChild(el("div",{style:{textAlign:"center",marginTop:"16px"}},[
+    el("a",{href:"/privacy.html",style:{fontSize:"12px",color:"#94a3b8",textDecoration:"none"},target:"_blank"},["プライバシーポリシー"])
+  ]));
+  wrap.appendChild(loginArea);
+
+  return wrap;
 }
 
 // ── Team Select ───────────────────────────────────────────────────────
 function buildTeamSelect(){
   const wrap=el("div",{style:{display:"flex",flexDirection:"column",minHeight:"100vh",background:"#f1f5f9"}});
   const hdr=el("div",{style:{background:"#0f2744",color:"#fff",padding:"24px 18px 20px"}});
-  hdr.appendChild(el("div",{style:{fontSize:"22px",fontWeight:"800",marginBottom:"4px"}},["🏀 minibasket-log"]));
+  hdr.appendChild(el("div",{style:{fontSize:"22px",fontWeight:"800",marginBottom:"4px"}},["🏀 ミニバスログ"]));
   hdr.appendChild(el("div",{style:{fontSize:"13px",opacity:"0.7"}},[user?.email||""]));
   wrap.appendChild(hdr);
 
