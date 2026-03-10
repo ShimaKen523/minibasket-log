@@ -453,6 +453,7 @@ function render(){
 
 function el(tag,attrs={},children=[]){
   const e=document.createElement(tag);
+  if(tag==="button"&&!attrs.type) e.setAttribute("type","button");
   Object.entries(attrs).forEach(([k,v])=>{
     if(k==="style"&&typeof v==="object") Object.assign(e.style,v);
     else if(k.startsWith("on")) e.addEventListener(k.slice(2).toLowerCase(),v);
@@ -502,7 +503,7 @@ function mkHdr(title,sub,showBack,backFn){
   if(sub) d.appendChild(el("div",{style:{fontSize:"13px",opacity:"0.65",marginTop:"2px"}},[sub]));
   return d;
 }
-function mkBtn(label,onClick,style={}){return el("button",{style:{...S.bp,...style},onClick},[label]);}
+function mkBtn(label,onClick,style={}){return el("button",{type:"button",style:{...S.bp,...style},onClick},[label]);}
 function mkLabel(txt){return el("label",{style:S.lbl},[txt]);}
 function mkInput(placeholder,value,onChange,type="text"){
   const i=el("input",{style:S.inp,placeholder,type,value:value??""});
