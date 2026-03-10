@@ -600,26 +600,32 @@ function buildLoading(){
 function buildLogin(){
   const wrap=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",background:"#f1f5f9",minHeight:"100vh",padding:"0 0 60px"}});
 
-  // ヒーローセクション
-  const hero=el("div",{style:{width:"100%",background:"#0f2744",padding:"48px 24px 40px",display:"flex",flexDirection:"column",alignItems:"center",gap:"16px"}});
-  hero.appendChild(el("div",{style:{fontSize:"56px"}},["🏀"]));
-  hero.appendChild(el("div",{style:{fontSize:"28px",fontWeight:"800",color:"#fff",textAlign:"center"}},["ミニバスログ"]));
-  hero.appendChild(el("div",{style:{fontSize:"13px",color:"rgba(255,255,255,0.65)",textAlign:"center",letterSpacing:"1px"}},["MiniBasketLog"]));
-  hero.appendChild(el("div",{style:{fontSize:"15px",color:"rgba(255,255,255,0.8)",textAlign:"center",marginTop:"4px"}},["ミニバスケットボールチームの戦績管理アプリ"]));
+  // ヒーローセクション（コンパクト化）
+  const hero=el("div",{style:{width:"100%",background:"#0f2744",padding:"28px 24px 24px",display:"flex",flexDirection:"column",alignItems:"center",gap:"8px"}});
+  hero.appendChild(el("div",{style:{fontSize:"40px"}},["🏀"]));
+  hero.appendChild(el("div",{style:{fontSize:"24px",fontWeight:"800",color:"#fff",textAlign:"center"}},["ミニバスログ"]));
+  hero.appendChild(el("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.55)",textAlign:"center",letterSpacing:"1px"}},["MiniBasketLog"]));
+  hero.appendChild(el("div",{style:{fontSize:"13px",color:"rgba(255,255,255,0.75)",textAlign:"center",marginTop:"2px"}},["ミニバスケットボールチームの戦績管理アプリ"]));
   wrap.appendChild(hero);
 
   // 機能紹介カード
-  const features=el("div",{style:{width:"100%",maxWidth:"400px",padding:"24px 16px 0"}});
+  const features=el("div",{style:{width:"100%",maxWidth:"400px",padding:"16px 16px 0"}});
   [
-    ["🏆","大会・試合の戦績管理","大会ごとに試合結果をまとめて記録。勝敗・スコアを一覧で確認できます。"],
-    ["👥","チームで共有","招待リンクでメンバーを招待。管理者・メンバーの権限管理もかんたんです。"],
+    ["🏆","大会・試合の戦績管理","大会ごとに試合結果をまとめて記録。\n勝敗・スコアを一覧で確認できます。"],
+    ["👥","チームで共有","招待リンクでメンバーを招待。\n管理者・メンバーの権限管理もかんたんです。"],
     ["📊","分析機能","対戦相手別・月別・会場別など多角的に戦績を分析できます。"],
   ].forEach(([icon,title,desc])=>{
-    const card=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"16px",marginBottom:"12px",display:"flex",gap:"14px",alignItems:"flex-start",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
-    card.appendChild(el("div",{style:{fontSize:"28px",flexShrink:"0"}},[icon]));
+    const card=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"14px",marginBottom:"10px",display:"flex",gap:"12px",alignItems:"flex-start",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
+    card.appendChild(el("div",{style:{fontSize:"24px",flexShrink:"0"}},[icon]));
     const txt=el("div",{});
-    txt.appendChild(el("div",{style:{fontWeight:"700",fontSize:"15px",color:"#0f2744",marginBottom:"4px"}},[title]));
-    txt.appendChild(el("div",{style:{fontSize:"13px",color:"#6b7280",lineHeight:"1.6"}},[desc]));
+    txt.appendChild(el("div",{style:{fontWeight:"700",fontSize:"14px",color:"#0f2744",marginBottom:"3px"}},[title]));
+    // 改行対応：\nでdivを分割
+    const descEl=el("div",{style:{fontSize:"12px",color:"#6b7280",lineHeight:"1.6"}});
+    desc.split("\n").forEach((line,i,arr)=>{
+      descEl.appendChild(document.createTextNode(line));
+      if(i<arr.length-1) descEl.appendChild(document.createElement("br"));
+    });
+    txt.appendChild(descEl);
     card.appendChild(txt);
     features.appendChild(card);
   });
