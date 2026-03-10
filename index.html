@@ -609,18 +609,18 @@ function buildLogin(){
   wrap.appendChild(hero);
 
   // 機能紹介カード
-  const features=el("div",{style:{width:"100%",maxWidth:"400px",padding:"16px 16px 0"}});
+  const features=el("div",{style:{width:"100%",maxWidth:"400px",padding:"20px 16px 0"}});
   [
     ["🏆","大会・試合の戦績管理","大会ごとに試合結果をまとめて記録。\n勝敗・スコアを一覧で確認できます。"],
     ["👥","チームで共有","招待リンクでメンバーを招待。\n管理者・メンバーの権限管理もかんたんです。"],
-    ["📊","分析機能","対戦相手別・月別・会場別など多角的に戦績を分析できます。"],
+    ["📊","分析機能","男女別・学年別・対戦相手別・月別・会場別など\n多角的に戦績を分析できます。"],
   ].forEach(([icon,title,desc])=>{
-    const card=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"14px",marginBottom:"10px",display:"flex",gap:"12px",alignItems:"flex-start",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
-    card.appendChild(el("div",{style:{fontSize:"24px",flexShrink:"0"}},[icon]));
+    const card=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"16px",marginBottom:"12px",display:"flex",gap:"14px",alignItems:"flex-start",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
+    card.appendChild(el("div",{style:{fontSize:"28px",flexShrink:"0"}},[icon]));
     const txt=el("div",{});
-    txt.appendChild(el("div",{style:{fontWeight:"700",fontSize:"14px",color:"#0f2744",marginBottom:"3px"}},[title]));
+    txt.appendChild(el("div",{style:{fontWeight:"700",fontSize:"15px",color:"#0f2744",marginBottom:"4px"}},[title]));
     // 改行対応：\nでdivを分割
-    const descEl=el("div",{style:{fontSize:"12px",color:"#6b7280",lineHeight:"1.6"}});
+    const descEl=el("div",{style:{fontSize:"13px",color:"#6b7280",lineHeight:"1.6"}});
     desc.split("\n").forEach((line,i,arr)=>{
       descEl.appendChild(document.createTextNode(line));
       if(i<arr.length-1) descEl.appendChild(document.createElement("br"));
