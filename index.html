@@ -67,7 +67,7 @@ let currentTeam  = null; // {id, name, invite_token, role}
 let myTeams      = [];   // [{id,name,invite_token,role}]
 let tournaments  = [];
 let players      = [];
-let view         = "loading";
+let view         = "login";
 // team screens
 let newTeamName  = "";
 let newTeamError = "";
@@ -171,6 +171,25 @@ sb.auth.onAuthStateChange(async (event, session) => {
     view="login"; render();
   }
 });
+
+// Edge等でonAuthStateChangeが発火しない場合のフォールバック
+(async()=>{
+  await new Promise(r=>setTimeout(r,800));
+  if(view!=="login") return; // すでに遷移済みならスキップ
+  const {data:{session}} = await sb.auth.getSession();
+  if(session){
+    user = session.user;
+    const invToken = sessionStorage.getItem('invite_token');
+    if(invToken){ pendingInviteToken=invToken; sessionStorage.removeItem('invite_token'); }
+    await loadMyTeams();
+    if(pendingInviteToken){ await handleInviteToken(pendingInviteToken); return; }
+    if(myTeams.length===0){ view="team_select"; render(); }
+    else if(myTeams.length===1){ await selectTeam(myTeams[0]); }
+    else { view="team_select"; render(); }
+  } else {
+    view="login"; render();
+  }
+})();
 
 async function loadMyTeams(){
   const {data} = await sb.from('team_members')
@@ -577,7 +596,6 @@ function mkEscortRows(body){
 // ── Build ─────────────────────────────────────────────────────────────
 function build(){
   const wrap=el("div",{style:S.root});
-  if(view==="loading"){    wrap.appendChild(buildLoading());    return wrap;}
   if(view==="login"){      wrap.appendChild(buildLogin());      return wrap;}
   if(view==="team_select"){wrap.appendChild(buildTeamSelect()); return wrap;}
   if(view==="join_confirm"){wrap.appendChild(buildJoinConfirm());return wrap;}
@@ -596,12 +614,6 @@ function build(){
 }
 
 // ── Loading ───────────────────────────────────────────────────────────
-function buildLoading(){
-  return el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",gap:"16px"}},[
-    el("div",{style:{fontSize:"48px"}},["🏀"]),
-    el("div",{style:{fontSize:"14px",color:"#94a3b8"}},["読み込み中..."])
-  ]);
-}
 
 // ── Login ─────────────────────────────────────────────────────────────
 function buildLogin(){
