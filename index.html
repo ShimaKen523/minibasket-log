@@ -36,7 +36,13 @@ const SUPABASE_URL     = 'https://bydxbcykaazwlhogrfae.supabase.co';
 const SUPABASE_ANON_KEY= 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ5ZHhiY3lrYWF6d2xob2dyZmFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5ODg2MzQsImV4cCI6MjA4ODU2NDYzNH0.vSf8SImFQU47bIG-8BixK4jdWhR7tp0h4TRMCeyanAA';
 
 const { createClient } = supabase;
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    storage: window.sessionStorage,
+    storageKey: 'minibasket-supabase-auth',
+    flowType: 'implicit',
+  }
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────
 const fiscalYear = s => { const d=new Date(s); return d.getMonth()>=3?d.getFullYear():d.getFullYear()-1; };
