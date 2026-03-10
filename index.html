@@ -41,6 +41,10 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     storage: window.sessionStorage,
     storageKey: 'minibasket-supabase-auth',
     flowType: 'implicit',
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+    lock: async (name, acquireTimeout, fn) => fn(),
   }
 });
 
@@ -99,8 +103,7 @@ function stopListeners(){
 async function startListeners(){
   stopListeners();
   if(!currentTeam) return;
-  await loadTournaments();
-  await loadPlayers();
+  await Promise.all([loadTournaments(), loadPlayers()]);
 
   const ch1 = sb.channel('tournaments-'+currentTeam.id)
     .on('postgres_changes',{event:'*',schema:'public',table:'tournaments',filter:`team_id=eq.${currentTeam.id}`},()=>loadTournaments())
@@ -145,9 +148,10 @@ async function loadPlayers(){
 
 // ── Auth ─────────────────────────────────────────────────────────────
 sb.auth.onAuthStateChange(async (event, session) => {
+  // INITIAL_SESSIONとSIGNED_INのみ処理（TOKEN_REFRESHEDは無視して重複処理を防ぐ）
+  if(event === 'TOKEN_REFRESHED') return;
   user = session?.user ?? null;
   if(user){
-    // 招待トークンが pending なら先に処理
     const invToken = sessionStorage.getItem('invite_token');
     if(invToken){ pendingInviteToken=invToken; sessionStorage.removeItem('invite_token'); }
     await loadMyTeams();
