@@ -615,7 +615,7 @@ function buildLogin(){
     ["👥","チームで共有","招待リンクでメンバーを招待。\n管理者・メンバーの権限管理もかんたんです。"],
     ["📊","分析機能","男女別・対戦相手別・月別・会場別など\n多角的に戦績を分析できます。"],
   ].forEach(([icon,title,desc])=>{
-    const card=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"16px",marginBottom:"12px",display:"flex",gap:"14px",alignItems:"flex-start",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
+    const card=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"14px",marginBottom:"12px",display:"flex",gap:"14px",alignItems:"flex-start",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
     card.appendChild(el("div",{style:{fontSize:"28px",flexShrink:"0"}},[icon]));
     const txt=el("div",{});
     txt.appendChild(el("div",{style:{fontWeight:"700",fontSize:"15px",color:"#0f2744",marginBottom:"4px"}},[title]));
