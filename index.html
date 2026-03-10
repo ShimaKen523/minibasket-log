@@ -306,7 +306,7 @@ async function addGame(){
     our_score:parseInt(gf.ourScore),their_score:parseInt(gf.theirScore),
     memo:gf.memo||null
   });
-  if(error){ge="保存に失敗しました";render();return;}
+  if(error){ge=`保存に失敗しました: ${error.message}`;render();return;}
   gf={opponent:"",ourScore:"",theirScore:"",memo:""}; ge=""; view="td"; await loadTournaments();
 }
 
@@ -506,7 +506,9 @@ function mkHdr(title,sub,showBack,backFn){
 function mkBtn(label,onClick,style={}){return el("button",{type:"button",style:{...S.bp,...style},onClick},[label]);}
 function mkLabel(txt){return el("label",{style:S.lbl},[txt]);}
 function mkInput(placeholder,value,onChange,type="text"){
-  const i=el("input",{style:S.inp,placeholder,type,value:value??""});
+  const i=document.createElement("input");
+  Object.assign(i.style,S.inp);
+  i.placeholder=placeholder; i.type=type; i.value=value??"";
   i.addEventListener("input",e=>onChange(e.target.value));
   return i;
 }
@@ -538,7 +540,9 @@ function mkScoreRow(){
   const mkSide=(label,val,key)=>{
     const w=el("div",{style:{flex:"1",display:"flex",flexDirection:"column",alignItems:"center",minWidth:"0"}});
     w.appendChild(el("div",{style:{fontSize:"11px",color:"#9ca3af",marginBottom:"4px",fontWeight:"600"}},[label]));
-    const i=el("input",{style:{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:"10px",padding:"10px 4px",fontSize:"26px",fontWeight:"900",textAlign:"center",boxSizing:"border-box",color:"#0f2744",fontFamily:"inherit",outline:"none"},type:"number",inputmode:"numeric",placeholder:"0"});
+    const i=document.createElement("input");
+    Object.assign(i.style,{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:"10px",padding:"10px 4px",fontSize:"26px",fontWeight:"900",textAlign:"center",boxSizing:"border-box",color:"#0f2744",fontFamily:"inherit",outline:"none"});
+    i.type="number"; i.inputMode="numeric"; i.placeholder="0";
     i.value=val??"";
     i.addEventListener("input",e=>{gf[key]=e.target.value;});
     w.appendChild(i);
@@ -852,6 +856,7 @@ function buildTD(){
   const top=el("div",{style:{display:"flex",alignItems:"center",gap:"6px",marginTop:"2px"}});
   top.appendChild(el("span",{style:{display:"inline-block",background:"#dbeafe",color:"#1d4ed8",fontSize:"12px",fontWeight:"700",padding:"3px 10px",borderRadius:"6px"}},[t.grade]));
   top.appendChild(el("span",{style:{display:"inline-block",background:genderBg,color:genderColor,fontSize:"12px",fontWeight:"700",padding:"3px 10px",borderRadius:"6px"}},[tGender]));
+  top.appendChild(el("span",{style:{fontSize:"13px",opacity:"0.65",flexShrink:"0"}},[`📅 ${fmtD(t.date)}`]));
   if(isAdmin){
     top.appendChild(el("button",{
       style:{marginLeft:"auto",background:"rgba(255,255,255,0.15)",border:"1px solid rgba(255,255,255,0.3)",color:"rgba(255,255,255,0.9)",borderRadius:"8px",padding:"5px 12px",fontSize:"12px",fontWeight:"600",cursor:"pointer",fontFamily:"inherit",flexShrink:"0"},
@@ -864,7 +869,6 @@ function buildTD(){
       }
     },["✏️ 大会を修正"]));
   }
-  top.appendChild(el("span",{style:{fontSize:"13px",opacity:"0.65",flexShrink:"0"}},[`📅 ${fmtD(t.date)}`]));
   hdr.appendChild(top);
   hdr.appendChild(el("div",{style:{fontSize:"20px",fontWeight:"800",marginTop:"6px"}},[t.name]));
   if(t.venue) hdr.appendChild(el("div",{style:{fontSize:"13px",opacity:"0.75",marginTop:"3px"}},[`📍 ${t.venue}`]));
