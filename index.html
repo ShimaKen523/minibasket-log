@@ -1157,44 +1157,61 @@ function buildAnal(){
   }
 
   if(analTab==="esc"){
-    const escList=getEscSummary(filt);
-    if(escList.length===0){body.appendChild(el("div",{style:S.emp},["データがありません"]));}
-    else{
-      const card=el("div",{style:{background:"#fff",borderRadius:"14px",marginBottom:"14px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",overflow:"hidden"}});
-      escList.forEach(([name,cnt],i)=>{
-        const isSelected=analEscSel===name;
-        const row2=el("div",{style:{padding:"12px 14px",borderBottom:"1px solid #f9fafb",cursor:"pointer",background:isSelected?"#eff6ff":"transparent",display:"flex",alignItems:"center",justifyContent:"space-between"},onClick:()=>{analEscSel=isSelected?null:name;render();}});
-        const left=el("div",{style:{display:"flex",alignItems:"center",gap:"10px"}});
-        const avatar=el("span",{style:{width:"32px",height:"32px",borderRadius:"50%",background:"#ede9fe",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:"0"}});
-        const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
-        svg.setAttribute("width","18");svg.setAttribute("height","18");svg.setAttribute("viewBox","0 0 24 24");svg.setAttribute("fill","#5b21b6");
-        const svgHead=document.createElementNS("http://www.w3.org/2000/svg","circle");
-        svgHead.setAttribute("cx","12");svgHead.setAttribute("cy","7");svgHead.setAttribute("r","4");
-        const svgBody=document.createElementNS("http://www.w3.org/2000/svg","path");
-        svgBody.setAttribute("d","M4 20c0-4 3.6-7 8-7s8 3 8 7");
-        svg.appendChild(svgHead);svg.appendChild(svgBody);
-        avatar.appendChild(svg);
-        left.appendChild(avatar);
-        left.appendChild(el("span",{style:{fontWeight:"700",fontSize:"15px",color:"#1f2937"}},[name]));
-        row2.appendChild(left);
-        const right2=el("div",{style:{display:"flex",alignItems:"center",gap:"10px"}});
-        right2.appendChild(el("span",{style:{fontSize:"16px",fontWeight:"900",color:"#0f2744"}},[`${cnt}回`]));
-        right2.appendChild(el("span",{style:{fontSize:"13px",color:"#94a3b8"}},[isSelected?"▼":"▶"]));
-        row2.appendChild(right2);card.appendChild(row2);
-        if(isSelected){
-          const det=el("div",{style:{background:"#f8fafc",padding:"10px 14px",borderBottom:"1px solid #f1f5f9"}});
-          filt.forEach(t2=>{
-            const myEsc=(t2.escorts||[]).find(e=>e.name===name);
-            if(!myEsc) return;
-            const dRow=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",padding:"6px 0",borderBottom:"1px solid #f1f5f9"}});
-            dRow.appendChild(el("span",{style:{fontSize:"13px",color:"#374151",flex:"1"}},[t2.name]));
-            dRow.appendChild(el("span",{style:{fontSize:"12px",color:"#6b7280"}},[`${fmtD(t2.date)}　${myEsc.dir==="round"?"往復":"片道"}`]));
-            det.appendChild(dRow);
-          });
-          card.appendChild(det);
-        }
+    const summary=getEscSummary(filt);
+    if(summary.length===0){
+      body.appendChild(el("div",{style:S.emp},["引率記録がありません"]));
+    } else {
+      const escTourMap={};
+      filt.forEach(t=>{
+        (t.escorts||[]).filter(e=>e.name).forEach(e=>{
+          if(!escTourMap[e.name]) escTourMap[e.name]=[];
+          escTourMap[e.name].push(t);
+        });
       });
-      body.appendChild(card);
+      summary.forEach(([n,c])=>{
+        const isSelected=analEscSel===n;
+        const card=el("div",{style:{background:"#fff",borderRadius:"14px",marginBottom:"10px",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",overflow:"hidden"}});
+        const row=el("div",{
+          style:{padding:"14px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",background:isSelected?"#eff6ff":"#fff"},
+          onClick:()=>{analEscSel=isSelected?null:n;render();}
+        });
+        const nameWrap=el("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
+        nameWrap.appendChild(el("span",{style:{fontSize:"16px",fontWeight:"600",color:"#1f2937"}},[`👤 ${n}`]));
+        nameWrap.appendChild(el("span",{style:{fontSize:"11px",color:isSelected?"#3b82f6":"#94a3b8",fontWeight:"600"}},[isSelected?"▼":"▶"]));
+        row.appendChild(nameWrap);
+        row.appendChild(el("span",{style:{fontSize:"24px",fontWeight:"900",color:"#0f2744"}},[`${c}回`]));
+        card.appendChild(row);
+        if(isSelected){
+          const tours=(escTourMap[n]||[]).slice().sort((a,b)=>new Date(b.date)-new Date(a.date));
+          const detail=el("div",{style:{background:"#f8fafc",borderTop:"1px solid #f1f5f9",padding:"10px 14px"}});
+          if(tours.length===0){
+            detail.appendChild(el("div",{style:{fontSize:"13px",color:"#94a3b8",textAlign:"center",padding:"10px 0"}},["大会情報がありません"]));
+          } else {
+            tours.forEach((t,i)=>{
+              const tGender=t.gender||"男子";
+              const genderColor=tGender==="男子"?"#1d4ed8":"#be185d";
+              const genderBg=tGender==="男子"?"#dbeafe":"#fce7f3";
+              const esc=(t.escorts||[]).find(e=>e.name===n);
+              const dirLabel=esc?(esc.dir==="round"?"往復":"片道"):"";
+              const tRow=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",padding:"9px 0",borderBottom:i<tours.length-1?"1px solid #f1f5f9":"none"}});
+              tRow.appendChild(el("span",{style:{fontSize:"12px",color:"#6b7280",flexShrink:"0",minWidth:"54px",fontWeight:"600"}},[fmtD(t.date)]));
+              const badges=el("div",{style:{display:"flex",gap:"4px",flexShrink:"0"}});
+              badges.appendChild(el("span",{style:{background:"#dbeafe",color:"#1d4ed8",fontSize:"10px",fontWeight:"700",padding:"2px 6px",borderRadius:"4px"}},[t.grade]));
+              badges.appendChild(el("span",{style:{background:genderBg,color:genderColor,fontSize:"10px",fontWeight:"700",padding:"2px 6px",borderRadius:"4px"}},[tGender]));
+              tRow.appendChild(badges);
+              const nameBlock=el("div",{style:{flex:"1",minWidth:"0"}});
+              nameBlock.appendChild(el("div",{style:{fontSize:"13px",fontWeight:"700",color:"#0f2744",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[t.name]));
+              if(t.venue) nameBlock.appendChild(el("div",{style:{fontSize:"11px",color:"#6b7280",marginTop:"1px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},[`📍 ${t.venue}`]));
+              tRow.appendChild(nameBlock);
+              if(dirLabel) tRow.appendChild(el("span",{style:{fontSize:"11px",color:"#94a3b8",flexShrink:"0"}},[dirLabel]));
+              detail.appendChild(tRow);
+            });
+          }
+          card.appendChild(detail);
+        }
+        body.appendChild(card);
+      });
+      body.appendChild(el("div",{style:{fontSize:"12px",color:"#94a3b8",marginTop:"4px",textAlign:"center"}},["往復＝1回、片道＝0.5回でカウント"]));
     }
   }
 
