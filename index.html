@@ -272,7 +272,7 @@ async function addTournament(){
     team_id:currentTeam.id, name:tf.name, grade:tf.grade,
     gender:tf.gender, date:tf.date, venue:tf.venue||null
   }).select().single();
-  if(error){te="保存に失敗しました";render();return;}
+  if(error){te=`保存に失敗しました: ${error.message}`;render();return;}
   if(escorts.length>0){
     await sb.from('escorts').insert(escorts.map(e=>({tournament_id:t.id,name:e.name,dir:e.dir})));
   }
@@ -470,7 +470,7 @@ const S={
   ytWrap:{display:"flex",gap:"6px",marginTop:"10px",overflowX:"auto",WebkitOverflowScrolling:"touch",paddingBottom:"2px",scrollbarWidth:"none"},
   ytb:{background:"rgba(255,255,255,0.12)",border:"none",color:"rgba(255,255,255,0.7)",borderRadius:"20px",padding:"5px 14px",fontSize:"13px",cursor:"pointer",fontFamily:"inherit",flexShrink:"0",whiteSpace:"nowrap"},
   ytba:{background:"#fff",color:"#0f2744",fontWeight:"700"},
-  filterRow:{display:"flex",alignItems:"center",gap:"6px",marginTop:"8px",flexWrap:"wrap"},
+  filterRow:{display:"flex",alignItems:"center",gap:"6px",marginTop:"8px",flexWrap:"nowrap",overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none"},
   filterGroup:{display:"flex",gap:"5px"},
   filterDivider:{width:"1px",height:"18px",background:"rgba(255,255,255,0.2)",flexShrink:"0"},
   grfBtn:{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.65)",borderRadius:"16px",padding:"4px 11px",fontSize:"12px",cursor:"pointer",fontFamily:"inherit",flexShrink:"0",whiteSpace:"nowrap"},
@@ -705,7 +705,7 @@ function buildJoinConfirm(){
     joinTeamError?el("div",{style:{color:"#dc2626",fontSize:"13px"}},[joinTeamError]):null,
     el("div",{style:{display:"flex",flexDirection:"column",gap:"10px",width:"100%",maxWidth:"340px"}},[
       mkBtn("参加する",joinTeam),
-      el("button",{style:S.bsc,onClick:()=>{pendingTeamInfo=null;view=myTeams.length?"team_select":"team_select";render();}},["キャンセル"])
+      el("button",{style:S.bsc,onClick:()=>{pendingTeamInfo=null;view="team_select";render();}},["キャンセル"])
     ])
   ]);
 }
@@ -802,7 +802,7 @@ function buildList(){
       const tl=t.games.filter(g=>res(g)==="lose").length;
       const card=el("div",{style:S.tc,onClick:()=>{sel=t.id;view="td";render();}});
       const top=el("div",{style:{display:"flex",alignItems:"center",gap:"6px"}});
-      top.appendChild(el("span",{style:{background:"#dbeafe",color:"#1d4ed8",fontSize:"11px",fontWeight:"700",padding:"3px 8px",borderRadius:"6px",flexShrink:"0"}},[t.grade]));
+      top.appendChild(el("span",{style:{background:"#f0fdf4",color:"#16a34a",fontSize:"11px",fontWeight:"700",padding:"3px 8px",borderRadius:"6px",flexShrink:"0"}},[t.grade]));
       top.appendChild(el("span",{style:{background:genderBg,color:genderColor,fontSize:"11px",fontWeight:"700",padding:"3px 8px",borderRadius:"6px",flexShrink:"0"}},[tGender]));
       top.appendChild(el("span",{style:{fontWeight:"700",fontSize:"16px",color:"#0f2744",flex:"1"}},[t.name]));
       top.appendChild(el("span",{style:{fontSize:"20px",color:"#cbd5e1"}},["›"]));
@@ -849,7 +849,7 @@ function buildTD(){
   const hdr=el("div",{style:{...S.hdr,paddingBottom:"20px"}});
   hdr.appendChild(el("button",{style:S.back,onClick:()=>{view="list";render();}},["← 戻る"]));
   const top=el("div",{style:{display:"flex",alignItems:"center",gap:"6px",marginTop:"2px"}});
-  top.appendChild(el("span",{style:{display:"inline-block",background:"#dbeafe",color:"#1d4ed8",fontSize:"12px",fontWeight:"700",padding:"3px 10px",borderRadius:"6px"}},[t.grade]));
+  top.appendChild(el("span",{style:{display:"inline-block",background:"#f0fdf4",color:"#16a34a",fontSize:"12px",fontWeight:"700",padding:"3px 10px",borderRadius:"6px"}},[t.grade]));
   top.appendChild(el("span",{style:{display:"inline-block",background:genderBg,color:genderColor,fontSize:"12px",fontWeight:"700",padding:"3px 10px",borderRadius:"6px"}},[tGender]));
   if(isAdmin){
     top.appendChild(el("button",{
@@ -1056,7 +1056,7 @@ function buildAnal(){
         const info2=el("div",{style:{flex:"1",minWidth:"0"}});
         info2.appendChild(el("div",{style:{fontSize:"12px",color:"#6b7280"}},[`${fmtD(g.tDate)}　${g.tName}`]));
         const tagRow=el("div",{style:{display:"flex",gap:"4px",marginTop:"2px",flexWrap:"wrap"}});
-        tagRow.appendChild(el("span",{style:{fontSize:"10px",fontWeight:"700",padding:"1px 6px",borderRadius:"4px",background:"#dbeafe",color:"#1d4ed8"}},[g.tGrade]));
+        tagRow.appendChild(el("span",{style:{fontSize:"10px",fontWeight:"700",padding:"1px 6px",borderRadius:"4px",background:"#f0fdf4",color:"#16a34a"}},[g.tGrade]));
         tagRow.appendChild(el("span",{style:{fontSize:"10px",fontWeight:"700",padding:"1px 6px",borderRadius:"4px",background:gb2,color:gc2}},[g.tGender]));
         info2.appendChild(tagRow);row.appendChild(info2);
         row.appendChild(el("span",{style:{fontSize:"16px",fontWeight:"900",color:"#0f2744",flexShrink:"0"}},[`${g.our_score}–${g.their_score}`]));
@@ -1098,7 +1098,7 @@ function buildAnal(){
             const tw2=t2.games.filter(g=>res(g)==="win").length;const tl2=t2.games.filter(g=>res(g)==="lose").length;
             const tBlock=el("div",{style:{marginBottom:ti<v.tournaments.length-1?"12px":"0"}});
             const tTop=el("div",{style:{display:"flex",alignItems:"center",gap:"5px",flexWrap:"wrap",marginBottom:"3px"}});
-            tTop.appendChild(el("span",{style:{background:"#dbeafe",color:"#1d4ed8",fontSize:"11px",fontWeight:"700",padding:"2px 7px",borderRadius:"5px"}},[t2.grade]));
+            tTop.appendChild(el("span",{style:{background:"#f0fdf4",color:"#16a34a",fontSize:"11px",fontWeight:"700",padding:"2px 7px",borderRadius:"5px"}},[t2.grade]));
             tTop.appendChild(el("span",{style:{background:gb3,color:gc3,fontSize:"11px",fontWeight:"700",padding:"2px 7px",borderRadius:"5px"}},[tGender2]));
             tTop.appendChild(el("span",{style:{fontWeight:"700",fontSize:"14px",color:"#0f2744"}},[t2.name]));
             tBlock.appendChild(tTop);
