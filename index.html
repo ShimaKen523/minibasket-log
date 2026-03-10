@@ -150,35 +150,11 @@ async function loadPlayers(){
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────
-sb.auth.onAuthStateChange(async (event, session) => {
-  // INITIAL_SESSIONとSIGNED_INのみ処理（TOKEN_REFRESHEDは無視して重複処理を防ぐ）
-  if(event === 'TOKEN_REFRESHED') return;
+
+// ログイン済みセッションの復元処理（UBSアプリのonAuthStateChangedと同等の役割）
+async function restoreSession(session){
   user = session?.user ?? null;
   if(user){
-    const invToken = sessionStorage.getItem('invite_token');
-    if(invToken){ pendingInviteToken=invToken; sessionStorage.removeItem('invite_token'); }
-    await loadMyTeams();
-    if(pendingInviteToken){
-      await handleInviteToken(pendingInviteToken);
-      return;
-    }
-    if(myTeams.length===0){ view="team_select"; render(); }
-    else if(myTeams.length===1){ await selectTeam(myTeams[0]); }
-    else { view="team_select"; render(); }
-  } else {
-    stopListeners();
-    tournaments=[]; players=[]; currentTeam=null; myTeams=[];
-    view="login"; render();
-  }
-});
-
-// Edge等でonAuthStateChangeが発火しない場合のフォールバック
-(async()=>{
-  await new Promise(r=>setTimeout(r,800));
-  if(view!=="login") return; // すでに遷移済みならスキップ
-  const {data:{session}} = await sb.auth.getSession();
-  if(session){
-    user = session.user;
     const invToken = sessionStorage.getItem('invite_token');
     if(invToken){ pendingInviteToken=invToken; sessionStorage.removeItem('invite_token'); }
     await loadMyTeams();
@@ -187,9 +163,24 @@ sb.auth.onAuthStateChange(async (event, session) => {
     else if(myTeams.length===1){ await selectTeam(myTeams[0]); }
     else { view="team_select"; render(); }
   } else {
+    stopListeners();
+    tournaments=[]; players=[]; currentTeam=null; myTeams=[];
     view="login"; render();
   }
+}
+
+// ページ読み込み時に即座にセッション確認（自動ログイン）
+(async()=>{
+  const {data:{session}} = await sb.auth.getSession();
+  await restoreSession(session);
 })();
+
+// ログイン・ログアウト操作時のみ反応
+sb.auth.onAuthStateChange(async (event, session) => {
+  if(event === 'SIGNED_IN' || event === 'SIGNED_OUT'){
+    await restoreSession(session);
+  }
+});
 
 async function loadMyTeams(){
   const {data} = await sb.from('team_members')
