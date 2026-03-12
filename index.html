@@ -43,7 +43,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     storage: window.localStorage,
     storageKey: 'minibasket-supabase-auth',
-    flowType: 'pkce',
+    flowType: 'implicit',
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
@@ -205,64 +205,38 @@ if(window.location.hash.includes('access_token')){
   history.replaceState(null, '', window.location.pathname);
 }
 
-// セッション処理の二重実行防止フラグ
-// onAuthStateChange(INITIAL_SESSION) と getSession() が競合しないよう制御する
-let currentUserId = null;
-let _sessionHandled = false;
+// ── Auth state management ────────────────────────────────────────────
+// restoreSession の並走を防ぐための排他制御
+// getSession() と onAuthStateChange(INITIAL_SESSION/SIGNED_IN) が同時に発火しても
+// restoreSession は必ず1回だけ実行されるよう Promise で直列化する
+let _restorePromise = null;
+function restoreSessionOnce(session){
+  if(_restorePromise) return _restorePromise;
+  _restorePromise = restoreSession(session).finally(()=>{ _restorePromise = null; });
+  return _restorePromise;
+}
 
 sb.auth.onAuthStateChange(async (event, session) => {
   dbg(`onAuthStateChange: ${event} / user=${session?.user?.email ?? 'null'}`);
-
   if(event === 'SIGNED_OUT'){
-    currentUserId = null;
-    _sessionHandled = false;
+    _restorePromise = null;
     await restoreSession(null);
     return;
   }
-
-  if(session?.user){
-    // ユーザーIDが変わった場合（別アカウントへの切り替え等）はフラグをリセット
-    if(session.user.id !== currentUserId){
-      currentUserId = session.user.id;
-      _sessionHandled = false;
-    }
-    if(!_sessionHandled){
-      _sessionHandled = true;
-      dbg(`handling session via onAuthStateChange (${event})`);
-      await restoreSession(session);
-    } else {
-      dbg(`skip event (already handled): ${event}`);
-    }
+  if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN'){
+    await restoreSessionOnce(session);
     return;
   }
-
-  dbg(`skip event (no session): ${event}`);
+  dbg(`skip event: ${event}`);
 });
 
-// ページ読み込み時: getSession()でセッション確認
-// onAuthStateChange(INITIAL_SESSION)が先に処理済みならスキップ
+// ページ読み込み時: getSession() でセッション確認
+// INITIAL_SESSION より先に返ってきた場合はここで処理し、後から来たら排他制御でスキップされる
 (async()=>{
   dbg('getSession() start');
   const {data:{session}, error} = await sb.auth.getSession();
   dbg(`getSession() result: user=${session?.user?.email ?? 'null'}, error=${error?.message ?? 'none'}`);
-  if(session?.user){
-    if(session.user.id !== currentUserId){
-      currentUserId = session.user.id;
-      _sessionHandled = false;
-    }
-    if(!_sessionHandled){
-      _sessionHandled = true;
-      dbg('handling session via getSession()');
-      await restoreSession(session);
-    } else {
-      dbg('getSession(): already handled by onAuthStateChange, skip');
-    }
-  } else {
-    if(!_sessionHandled){
-      _sessionHandled = true;
-      await restoreSession(null);
-    }
-  }
+  await restoreSessionOnce(session ?? null);
 })();
 
 async function loadMyTeams(){
@@ -742,7 +716,7 @@ function buildLogin(){
   ]));
   // バージョン表示
   loginArea.appendChild(el("div",{style:{textAlign:"center",marginTop:"8px"}},[
-    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.0.00"])
+    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.0.01"])
   ]));
 
   // デバッグパネル
