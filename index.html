@@ -187,17 +187,27 @@ async function restoreSession(session){
   if(user){
     const invToken = sessionStorage.getItem('invite_token');
     if(invToken){ pendingInviteToken=invToken; sessionStorage.removeItem('invite_token'); }
-    await loadMyTeams();
-    dbg(`loadMyTeams done: ${myTeams.length} teams`);
+    try {
+      dbg(`calling loadMyTeams...`);
+      await loadMyTeams();
+      dbg(`loadMyTeams done: ${myTeams.length} teams / ${JSON.stringify(myTeams.map(t=>t.name))}`);
+    } catch(e) {
+      dbg(`loadMyTeams ERROR: ${e.message}`);
+      view="login"; render(); return;
+    }
     if(pendingInviteToken){ await handleInviteToken(pendingInviteToken); return; }
     if(myTeams.length===0){ view="team_select"; render(); }
-    else if(myTeams.length===1){ await selectTeam(myTeams[0]); }
+    else if(myTeams.length===1){
+      dbg(`calling selectTeam: ${myTeams[0].name}`);
+      try { await selectTeam(myTeams[0]); dbg(`selectTeam done`); }
+      catch(e){ dbg(`selectTeam ERROR: ${e.message}`); view="login"; render(); }
+    }
     else { view="team_select"; render(); }
   } else {
     stopListeners();
     tournaments=[]; players=[]; currentTeam=null; myTeams=[];
     view="login"; render();
-    dbg(`→ showing login screen`);
+    dbg(`showing login screen`);
   }
 }
 
@@ -211,9 +221,12 @@ sb.auth.onAuthStateChange(async (event, session) => {
 });
 
 async function loadMyTeams(){
-  const {data} = await sb.from('team_members')
+  dbg(`loadMyTeams: querying for user.id=${user?.id}`);
+  const {data, error} = await sb.from('team_members')
     .select('team_id, role, teams(id,name,invite_token)')
     .eq('user_id', user.id);
+  if(error){ dbg(`loadMyTeams Supabase error: ${error.message} / code=${error.code}`); throw error; }
+  dbg(`loadMyTeams raw data length: ${data?.length ?? 'null'}`);
   myTeams = (data||[]).map(m=>({
     id: m.teams.id,
     name: m.teams.name,
