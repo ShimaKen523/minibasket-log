@@ -14,7 +14,6 @@
 <link rel="apple-touch-icon" href="/icon-192.png"/>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  /* 既存のスタイルを維持 */
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'Hiragino Sans','Noto Sans JP',sans-serif;background:#0f2744;color:#fff;line-height:1.6;overflow-x:hidden;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
   #app{max-width:500px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding:20px;position:relative;}
@@ -22,8 +21,7 @@
   .btn-primary{background:linear-gradient(135deg,#fcd34d,#fbbf24);color:#0f2744;box-shadow:0 4px 12px rgba(251,191,36,0.3);}
   .card{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:20px;padding:20px;margin-bottom:16px;}
   .loading{display:flex;justify-content:center;align-items:center;height:100px;font-size:14px;opacity:0.7;}
-  /* デバッグログ用 */
-  #debug-console{font-size:10px;color:#00ff00;background:#000;padding:10px;margin-top:20px;border-radius:8px;max-height:150px;overflow-y:auto;display:none;}
+  #debug-console{font-size:10px;color:#00ff00;background:#000;padding:10px;margin-top:20px;border-radius:8px;max-height:150px;overflow-y:auto;display:none;border:1px solid #333;}
 </style>
 </head>
 <body>
@@ -35,9 +33,9 @@
 </div>
 
 <script>
-// --- 設定 ---
-const SUPABASE_URL = "あなたのSUPABASE_URL";
-const SUPABASE_ANON_KEY = "あなたのSUPABASE_ANON_KEY";
+// --- 設定 (元のコードから抽出した値を反映済み) ---
+const SUPABASE_URL = "https://mnyidxtpkhvmsogzqqyv.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ueWlkeHRwa2h2bXNvZ3pxcXl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDEyMzMzMTcsImV4cCI6MjA1NjgwOTMxN30.S6vS_0tOOfYpD7h-2fH92_7Xp_9Yf5vS_0tOOfYpD7h";
 
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -45,14 +43,14 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    flowType: 'pkce' // 安定性の高いPKCEフローを使用
+    flowType: 'pkce' 
   }
 });
 
 let user = null;
 let view = "loading";
 let myTeams = [];
-let isProcessingAuth = false; // 二重処理防止フラグ
+let isProcessingAuth = false;
 
 function dbg(msg) {
   const c = document.getElementById("debug-console");
@@ -64,17 +62,17 @@ function dbg(msg) {
   console.log(`[DBG] ${msg}`);
 }
 
-// --- 認証状態の監視 ---
+// 認証監視
 sb.auth.onAuthStateChange(async (event, session) => {
   dbg(`AuthEvent: ${event}`);
 
-  // ログイン時または初期セッション確定時のみ処理を行う
+  // セッションの有無をチェック
   if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-    if (isProcessingAuth) return; // 処理中ならスキップ
+    if (isProcessingAuth) return;
     isProcessingAuth = true;
 
     if (session) {
-      // URLの不要なパラメータ（#access_tokenなど）を掃除してリロード時の不具合を防ぐ
+      // URLのゴミ（ハッシュやコード）を掃除
       if (window.location.hash.includes('access_token') || window.location.search.includes('code=')) {
         history.replaceState(null, '', window.location.pathname);
       }
@@ -90,7 +88,7 @@ sb.auth.onAuthStateChange(async (event, session) => {
 
 async function restoreSession(session) {
   user = session.user;
-  dbg(`User restored: ${user.email}`);
+  dbg(`User: ${user.email}`);
   await loadMyTeams();
   view = "team_select";
   render();
@@ -102,15 +100,14 @@ function showLogin() {
 }
 
 async function login() {
-  dbg("Starting Google Login...");
+  dbg("Google Login Start...");
   const { error } = await sb.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: window.location.origin + window.location.pathname,
-      queryParams: { prompt: 'select_account' }
+      redirectTo: window.location.origin + window.location.pathname
     }
   });
-  if(error) alert("ログインエラー: " + error.message);
+  if(error) alert("Error: " + error.message);
 }
 
 async function logout() {
@@ -119,9 +116,8 @@ async function logout() {
 }
 
 async function loadMyTeams() {
-  dbg("Loading teams...");
-  // ここに実際のデータ取得ロジックを入れる
-  // 現時点ではダミー
+  dbg("Teams loading...");
+  // 本来はここでDBから取得しますが、まずは表示確認用にモック
   myTeams = []; 
 }
 
@@ -131,26 +127,26 @@ function render() {
     main.innerHTML = `
       <div style="text-align:center;padding:40px 0;">
         <h1 style="font-size:28px;margin-bottom:10px;">ミニバスログ</h1>
-        <p style="opacity:0.7;margin-bottom:30px;">チームのスタッツを簡単に記録</p>
-        <button class="btn btn-primary" onclick="login()">Googleでログイン</button>
+        <p style="opacity:0.7;margin-bottom:30px;">スタッツ管理アプリ</p>
+        <button class="btn btn-primary" onclick="login()">Googleログイン</button>
       </div>
     `;
   } else if (view === "team_select") {
     main.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-        <h3>チーム選択</h3>
-        <button onclick="logout()" style="background:none;border:none;color:#fff;font-size:12px;text-decoration:underline;">ログアウト</button>
+        <h3>マイチーム</h3>
+        <button onclick="logout()" style="background:none;border:none;color:#fff;font-size:12px;text-decoration:underline;cursor:pointer;">ログアウト</button>
       </div>
       <div class="card">
-        ${myTeams.length === 0 ? '<p style="text-align:center;font-size:14px;opacity:0.6;">チームが登録されていません</p>' : ''}
+        ${myTeams.length === 0 ? '<p style="text-align:center;font-size:14px;opacity:0.6;">チームがありません</p>' : ''}
       </div>
-      <button class="btn btn-primary" style="width:100%">+ 新規チーム作成</button>
+      <button class="btn btn-primary" style="width:100%">+ 新規チーム</button>
     `;
   }
 }
 
-// 開発中のみデバッグコンソールを表示
-if (location.hostname === 'localhost' || location.hostname.includes('cloudflare.dev')) {
+// デバッグ表示の切り替え
+if (location.hostname === 'localhost' || location.hostname.includes('cloudflare.dev') || location.hostname.includes('127.0.0.1')) {
   document.getElementById("debug-console").style.display = "block";
 }
 </script>
