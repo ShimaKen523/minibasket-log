@@ -216,9 +216,11 @@ sb.auth.onAuthStateChange(async (event, session) => {
 });
 
 async function loadMyTeams(){
-  const {data} = await sb.from('team_members')
+  dbg(`loadMyTeams start: user.id=${user?.id}`);
+  const {data, error} = await sb.from('team_members')
     .select('team_id, role, teams(id,name,invite_token)')
     .eq('user_id', user.id);
+  dbg(`loadMyTeams result: data=${data?.length ?? 'null'}, error=${error?.message ?? 'none'}`);
   myTeams = (data||[]).map(m=>({
     id: m.teams.id,
     name: m.teams.name,
