@@ -158,15 +158,22 @@ async function restoreSession(session){
   if(user){
     const invToken = sessionStorage.getItem('invite_token');
     if(invToken){ pendingInviteToken=invToken; sessionStorage.removeItem('invite_token'); }
-    await loadMyTeams();
+    try {
+      await loadMyTeams();
+      dbg(`loadMyTeams OK: ${myTeams.length} teams`);
+    } catch(e) {
+      dbg(`loadMyTeams ERROR: ${e.message}`);
+      view="login"; render(); return;
+    }
     if(pendingInviteToken){ await handleInviteToken(pendingInviteToken); return; }
-    if(myTeams.length===0){ view="team_select"; render(); }
-    else if(myTeams.length===1){ await selectTeam(myTeams[0]); }
-    else { view="team_select"; render(); }
+    if(myTeams.length===0){ dbg('no teams → team_select'); view="team_select"; render(); }
+    else if(myTeams.length===1){ dbg(`selectTeam: ${myTeams[0].name}`); await selectTeam(myTeams[0]); dbg('selectTeam done'); }
+    else { dbg('multiple teams → team_select'); view="team_select"; render(); }
   } else {
     stopListeners();
     tournaments=[]; players=[]; currentTeam=null; myTeams=[];
     view="login"; render();
+    dbg('→ login screen (no user)');
   }
 }
 
