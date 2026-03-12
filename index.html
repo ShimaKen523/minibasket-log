@@ -43,11 +43,10 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     storage: window.localStorage,
     storageKey: 'minibasket-supabase-auth',
-    flowType: 'implicit',
+    flowType: 'pkce',
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
-    lock: async (name, acquireTimeout, fn) => fn(),
   }
 });
 
@@ -206,8 +205,8 @@ if(window.location.hash.includes('access_token')){
   history.replaceState(null, '', window.location.pathname);
 }
 
-// onAuthStateChange: SIGNED_OUT は即時処理、セッションありは二重実行防止フラグで管理
-// TOKEN_REFRESHED / INITIAL_SESSION などリロード時の全イベントを安全に処理する
+// セッション処理の二重実行防止フラグ
+// onAuthStateChange(INITIAL_SESSION) と getSession() が競合しないよう制御する
 let currentUserId = null;
 let _sessionHandled = false;
 
@@ -222,7 +221,7 @@ sb.auth.onAuthStateChange(async (event, session) => {
   }
 
   if(session?.user){
-    // ユーザーが切り替わった場合はフラグをリセット
+    // ユーザーIDが変わった場合（別アカウントへの切り替え等）はフラグをリセット
     if(session.user.id !== currentUserId){
       currentUserId = session.user.id;
       _sessionHandled = false;
@@ -240,8 +239,8 @@ sb.auth.onAuthStateChange(async (event, session) => {
   dbg(`skip event (no session): ${event}`);
 });
 
-// ページ読み込み時: getSession()で即時セッション確認
-// onAuthStateChangeより先に発火した場合はこちらで処理、後なら _sessionHandled でスキップ
+// ページ読み込み時: getSession()でセッション確認
+// onAuthStateChange(INITIAL_SESSION)が先に処理済みならスキップ
 (async()=>{
   dbg('getSession() start');
   const {data:{session}, error} = await sb.auth.getSession();
@@ -256,7 +255,7 @@ sb.auth.onAuthStateChange(async (event, session) => {
       dbg('handling session via getSession()');
       await restoreSession(session);
     } else {
-      dbg('getSession(): session already handled by onAuthStateChange, skip');
+      dbg('getSession(): already handled by onAuthStateChange, skip');
     }
   } else {
     if(!_sessionHandled){
