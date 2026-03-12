@@ -201,11 +201,18 @@ try {
 // ── END DEBUG ─────────────────────────────────────────────────────────
 
 // セッション復元
-// SIGNED_INが複数回発火する（Realtimeチャンネル接続時など）ので
-// 既にログイン済みの場合は無視するガードを設ける
+// SIGNED_INはRealtimeチャンネル接続時にも再発火するため、
+// currentUserIdで同一ユーザーの2回目以降をスキップする
 let currentUserId = null;
 sb.auth.onAuthStateChange(async (event, session) => {
   dbg(`onAuthStateChange: ${event} / user=${session?.user?.email ?? 'null'}`);
+
+  // ログイン後にURLに残る#access_tokenを消去（残っているとリロード時に再処理される）
+  if(window.location.hash.includes('access_token')){
+    dbg('clearing access_token from URL hash');
+    history.replaceState(null, '', window.location.pathname);
+  }
+
   if(event === 'SIGNED_OUT'){
     currentUserId = null;
     await restoreSession(null);
