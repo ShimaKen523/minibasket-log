@@ -200,18 +200,24 @@ try {
 } catch(e){ dbg(`localStorage error: ${e.message}`); }
 // ── END DEBUG ─────────────────────────────────────────────────────────
 
-// getSession()でlocalStorageから直接セッション取得（lockを経由しないため競合しない）
-(async()=>{
-  dbg('getSession() start');
-  const {data:{session}, error} = await sb.auth.getSession();
-  dbg(`getSession() done: user=${session?.user?.email ?? 'null'}, error=${error?.message ?? 'none'}`);
-  await restoreSession(session);
-})();
-
-// ログアウト・再ログイン時のみonAuthStateChangeを使う
+// セッション復元
+// SIGNED_INが複数回発火する（Realtimeチャンネル接続時など）ので
+// 既にログイン済みの場合は無視するガードを設ける
+let currentUserId = null;
 sb.auth.onAuthStateChange(async (event, session) => {
   dbg(`onAuthStateChange: ${event} / user=${session?.user?.email ?? 'null'}`);
-  if(event === 'SIGNED_OUT' || event === 'SIGNED_IN'){
+  if(event === 'SIGNED_OUT'){
+    currentUserId = null;
+    await restoreSession(null);
+    return;
+  }
+  if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN'){
+    const newUserId = session?.user?.id ?? null;
+    if(currentUserId && currentUserId === newUserId){
+      dbg(`skip: already logged in as ${newUserId}`);
+      return;
+    }
+    currentUserId = newUserId;
     await restoreSession(session);
   }
 });
