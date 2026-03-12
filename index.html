@@ -199,16 +199,8 @@ try {
 } catch(e){ dbg(`localStorage error: ${e.message}`); }
 // ── END DEBUG ─────────────────────────────────────────────────────────
 
-// URLに残る#access_tokenを消去（リロード時の再処理防止）
-if(window.location.hash.includes('access_token')){
-  dbg('clearing access_token from URL hash');
-  history.replaceState(null, '', window.location.pathname);
-}
-
 // ── Auth state management ────────────────────────────────────────────
 // restoreSession の並走を防ぐための排他制御
-// getSession() と onAuthStateChange(INITIAL_SESSION/SIGNED_IN) が同時に発火しても
-// restoreSession は必ず1回だけ実行されるよう Promise で直列化する
 let _restorePromise = null;
 function restoreSessionOnce(session){
   if(_restorePromise) return _restorePromise;
@@ -223,7 +215,16 @@ sb.auth.onAuthStateChange(async (event, session) => {
     await restoreSession(null);
     return;
   }
-  if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN'){
+  if(event === 'SIGNED_IN'){
+    // SIGNED_IN はログイン直後のリダイレクト完了。セッションを処理してからハッシュを消去する
+    await restoreSessionOnce(session);
+    if(window.location.hash.includes('access_token')){
+      dbg('clearing access_token from URL hash (after SIGNED_IN)');
+      history.replaceState(null, '', window.location.pathname);
+    }
+    return;
+  }
+  if(event === 'INITIAL_SESSION'){
     await restoreSessionOnce(session);
     return;
   }
@@ -231,12 +232,17 @@ sb.auth.onAuthStateChange(async (event, session) => {
 });
 
 // ページ読み込み時: getSession() でセッション確認
-// INITIAL_SESSION より先に返ってきた場合はここで処理し、後から来たら排他制御でスキップされる
+// ※ #access_token はここより前に消去しない（Supabase がまだ読み取っている可能性があるため）
 (async()=>{
   dbg('getSession() start');
   const {data:{session}, error} = await sb.auth.getSession();
   dbg(`getSession() result: user=${session?.user?.email ?? 'null'}, error=${error?.message ?? 'none'}`);
   await restoreSessionOnce(session ?? null);
+  // getSession() 完了後にハッシュを消去（SIGNED_IN 経由でなかった場合のフォールバック）
+  if(window.location.hash.includes('access_token')){
+    dbg('clearing access_token from URL hash (after getSession)');
+    history.replaceState(null, '', window.location.pathname);
+  }
 })();
 
 async function loadMyTeams(){
@@ -716,7 +722,7 @@ function buildLogin(){
   ]));
   // バージョン表示
   loginArea.appendChild(el("div",{style:{textAlign:"center",marginTop:"8px"}},[
-    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.0.01"])
+    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.0.02"])
   ]));
 
   // デバッグパネル
