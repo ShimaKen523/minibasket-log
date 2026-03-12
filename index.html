@@ -43,11 +43,10 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     storage: window.localStorage,
     storageKey: 'minibasket-supabase-auth',
-    flowType: 'implicit',
+    flowType: 'pkce',
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
-    lock: async (name, acquireTimeout, fn) => fn(),
   }
 });
 
@@ -152,81 +151,34 @@ async function loadPlayers(){
 // ── Auth ─────────────────────────────────────────────────────────────
 
 // ログイン済みセッションの復元処理（UBSアプリのonAuthStateChangedと同等の役割）
-// ── DEBUG LOG ──────────────────────────────────────────────────────────
-const debugLogs = [];
-function dbg(msg){
-  const t = new Date().toISOString().slice(11,23);
-  const line = `[${t}] ${msg}`;
-  debugLogs.push(line);
-  console.log(line);
-  const el = document.getElementById('debug-panel');
-  if(el){ el.textContent = debugLogs.slice(-30).join('\n'); }
-}
-
-// ページ読み込み直後の状態を記録
-dbg(`--- PAGE LOAD ---`);
-dbg(`UA: ${navigator.userAgent.slice(0,80)}`);
-dbg(`URL hash: "${location.hash.slice(0,60)}"`);
-dbg(`URL search: "${location.search.slice(0,60)}"`);
-dbg(`localStorage key exists: ${!!localStorage.getItem('minibasket-supabase-auth')}`);
-try {
-  const raw = localStorage.getItem('minibasket-supabase-auth');
-  if(raw){
-    const parsed = JSON.parse(raw);
-    const exp = parsed?.expires_at;
-    const now = Math.floor(Date.now()/1000);
-    dbg(`stored session expires_at: ${exp} (now=${now}, diff=${exp-now}s)`);
-    dbg(`stored user: ${parsed?.user?.email ?? 'none'}`);
-  }
-} catch(e){ dbg(`localStorage parse error: ${e.message}`); }
-// ── END DEBUG INIT ─────────────────────────────────────────────────────
-
 async function restoreSession(session){
-  dbg(`restoreSession called: user=${session?.user?.email ?? 'null'}`);
   user = session?.user ?? null;
   if(user){
     const invToken = sessionStorage.getItem('invite_token');
     if(invToken){ pendingInviteToken=invToken; sessionStorage.removeItem('invite_token'); }
-    try {
-      dbg(`calling loadMyTeams...`);
-      await loadMyTeams();
-      dbg(`loadMyTeams done: ${myTeams.length} teams / ${JSON.stringify(myTeams.map(t=>t.name))}`);
-    } catch(e) {
-      dbg(`loadMyTeams ERROR: ${e.message}`);
-      view="login"; render(); return;
-    }
+    await loadMyTeams();
     if(pendingInviteToken){ await handleInviteToken(pendingInviteToken); return; }
     if(myTeams.length===0){ view="team_select"; render(); }
-    else if(myTeams.length===1){
-      dbg(`calling selectTeam: ${myTeams[0].name}`);
-      try { await selectTeam(myTeams[0]); dbg(`selectTeam done`); }
-      catch(e){ dbg(`selectTeam ERROR: ${e.message}`); view="login"; render(); }
-    }
+    else if(myTeams.length===1){ await selectTeam(myTeams[0]); }
     else { view="team_select"; render(); }
   } else {
     stopListeners();
     tournaments=[]; players=[]; currentTeam=null; myTeams=[];
     view="login"; render();
-    dbg(`showing login screen`);
   }
 }
 
-// INITIAL_SESSION：ページ読み込み時の自動ログイン復元
-// SIGNED_IN / SIGNED_OUT：ログイン・ログアウト操作時
+// PKCE flow: INITIAL_SESSION でページ読み込み時の自動ログイン復元も行う
 sb.auth.onAuthStateChange(async (event, session) => {
-  dbg(`onAuthStateChange: event=${event}, user=${session?.user?.email ?? 'null'}`);
   if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT'){
     await restoreSession(session);
   }
 });
 
 async function loadMyTeams(){
-  dbg(`loadMyTeams: querying for user.id=${user?.id}`);
-  const {data, error} = await sb.from('team_members')
+  const {data} = await sb.from('team_members')
     .select('team_id, role, teams(id,name,invite_token)')
     .eq('user_id', user.id);
-  if(error){ dbg(`loadMyTeams Supabase error: ${error.message} / code=${error.code}`); throw error; }
-  dbg(`loadMyTeams raw data length: ${data?.length ?? 'null'}`);
   myTeams = (data||[]).map(m=>({
     id: m.teams.id,
     name: m.teams.name,
@@ -247,15 +199,14 @@ async function selectTeam(team){
 }
 
 async function login(){
-  dbg(`login() called, redirectTo=${window.location.href}`);
   const {error} = await sb.auth.signInWithOAuth({
     provider:'google',
     options:{
-      redirectTo: window.location.href,
+      redirectTo: window.location.origin + window.location.pathname,
       queryParams: { prompt: 'select_account' }
     }
   });
-  if(error){ dbg(`login error: ${error.message}`); alert("ログイン失敗: "+error.message); }
+  if(error) alert("ログイン失敗: "+error.message);
 }
 async function logout(){
   stopListeners();
@@ -697,21 +648,6 @@ function buildLogin(){
   loginArea.appendChild(el("div",{style:{textAlign:"center",marginTop:"16px"}},[
     el("a",{href:"/privacy.html",style:{fontSize:"12px",color:"#94a3b8",textDecoration:"none"},target:"_blank"},["プライバシーポリシー"])
   ]));
-
-  // デバッグパネル
-  const debugWrap = el("div",{style:{marginTop:"24px"}});
-  const debugToggle = el("button",{
-    style:{width:"100%",background:"#e2e8f0",color:"#475569",border:"none",borderRadius:"8px",padding:"8px",fontSize:"12px",cursor:"pointer"},
-    onClick:()=>{ const p=document.getElementById('debug-panel'); p.style.display=p.style.display==='none'?'block':'none'; }
-  },["🔍 デバッグログを表示"]);
-  const debugPanel = el("pre",{
-    id:"debug-panel",
-    style:{display:"none",marginTop:"8px",background:"#1e293b",color:"#94d468",fontSize:"10px",padding:"10px",borderRadius:"8px",overflowX:"auto",whiteSpace:"pre-wrap",wordBreak:"break-all",maxHeight:"300px",overflowY:"auto"}
-  },[debugLogs.slice(-30).join('\n')]);
-  debugWrap.appendChild(debugToggle);
-  debugWrap.appendChild(debugPanel);
-  loginArea.appendChild(debugWrap);
-
   wrap.appendChild(loginArea);
 
   return wrap;
