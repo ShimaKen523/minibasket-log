@@ -33,7 +33,7 @@
 </div>
 
 <script>
-// --- 設定 (元のコードから抽出した値を反映済み) ---
+// --- 設定 ---
 const SUPABASE_URL = "https://mnyidxtpkhvmsogzqqyv.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ueWlkeHRwa2h2bXNvZ3pxcXl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDEyMzMzMTcsImV4cCI6MjA1NjgwOTMxN30.S6vS_0tOOfYpD7h-2fH92_7Xp_9Yf5vS_0tOOfYpD7h";
 
@@ -43,14 +43,13 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    flowType: 'pkce' 
+    flowType: 'implicit' // エラー回避のため一旦元のフローに戻します
   }
 });
 
 let user = null;
 let view = "loading";
 let myTeams = [];
-let isProcessingAuth = false;
 
 function dbg(msg) {
   const c = document.getElementById("debug-console");
@@ -62,31 +61,44 @@ function dbg(msg) {
   console.log(`[DBG] ${msg}`);
 }
 
-// 認証監視
-sb.auth.onAuthStateChange(async (event, session) => {
-  dbg(`AuthEvent: ${event}`);
-
-  // セッションの有無をチェック
-  if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-    if (isProcessingAuth) return;
-    isProcessingAuth = true;
-
-    if (session) {
-      // URLのゴミ（ハッシュやコード）を掃除
-      if (window.location.hash.includes('access_token') || window.location.search.includes('code=')) {
-        history.replaceState(null, '', window.location.pathname);
-      }
-      await restoreSession(session);
+// ── 初期化ロジック ──
+async function initApp() {
+  dbg("Checking session...");
+  
+  // 1. 現在のセッションを取得
+  const { data: { session }, error } = await sb.auth.getSession();
+  
+  if (session) {
+    // ログイン済みの場合
+    await restoreSession(session);
+  } else {
+    // 未ログインの場合、またはログイン試行中（URLにハッシュがある）
+    if (window.location.hash.includes('access_token')) {
+      dbg("Found token in URL, waiting for auth event...");
+      // ハッシュがある場合は onAuthStateChange で処理されるのを待つ
     } else {
       showLogin();
     }
-    isProcessingAuth = false;
+  }
+}
+
+// ── 認証状態の監視 ──
+sb.auth.onAuthStateChange(async (event, session) => {
+  dbg(`AuthEvent: ${event}`);
+
+  if (event === 'SIGNED_IN') {
+    // ログイン成功直後、URLのハッシュを消去（リロード対策）
+    if (window.location.hash.includes('access_token')) {
+      history.replaceState(null, '', window.location.pathname);
+    }
+    await restoreSession(session);
   } else if (event === 'SIGNED_OUT') {
     showLogin();
   }
 });
 
 async function restoreSession(session) {
+  if (!session) return;
   user = session.user;
   dbg(`User: ${user.email}`);
   await loadMyTeams();
@@ -101,13 +113,12 @@ function showLogin() {
 
 async function login() {
   dbg("Google Login Start...");
-  const { error } = await sb.auth.signInWithOAuth({
+  await sb.auth.signInWithOAuth({
     provider: 'google',
     options: {
       redirectTo: window.location.origin + window.location.pathname
     }
   });
-  if(error) alert("Error: " + error.message);
 }
 
 async function logout() {
@@ -116,9 +127,8 @@ async function logout() {
 }
 
 async function loadMyTeams() {
-  dbg("Teams loading...");
-  // 本来はここでDBから取得しますが、まずは表示確認用にモック
-  myTeams = []; 
+  dbg("Loading data...");
+  // データの読み込み処理
 }
 
 function render() {
@@ -127,8 +137,7 @@ function render() {
     main.innerHTML = `
       <div style="text-align:center;padding:40px 0;">
         <h1 style="font-size:28px;margin-bottom:10px;">ミニバスログ</h1>
-        <p style="opacity:0.7;margin-bottom:30px;">スタッツ管理アプリ</p>
-        <button class="btn btn-primary" onclick="login()">Googleログイン</button>
+        <button class="btn btn-primary" onclick="login()">Googleでログイン</button>
       </div>
     `;
   } else if (view === "team_select") {
@@ -138,14 +147,16 @@ function render() {
         <button onclick="logout()" style="background:none;border:none;color:#fff;font-size:12px;text-decoration:underline;cursor:pointer;">ログアウト</button>
       </div>
       <div class="card">
-        ${myTeams.length === 0 ? '<p style="text-align:center;font-size:14px;opacity:0.6;">チームがありません</p>' : ''}
+        <p style="text-align:center;font-size:14px;opacity:0.6;">チームがありません</p>
       </div>
-      <button class="btn btn-primary" style="width:100%">+ 新規チーム</button>
     `;
   }
 }
 
-// デバッグ表示の切り替え
+// 起動
+initApp();
+
+// デバッグコンソール表示
 if (location.hostname === 'localhost' || location.hostname.includes('cloudflare.dev') || location.hostname.includes('127.0.0.1')) {
   document.getElementById("debug-console").style.display = "block";
 }
