@@ -43,10 +43,11 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     storage: window.localStorage,
     storageKey: 'minibasket-supabase-auth',
-    flowType: 'pkce',
+    flowType: 'implicit',
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
+    lock: async (name, acquireTimeout, fn) => fn(),
   }
 });
 
@@ -168,9 +169,18 @@ async function restoreSession(session){
   }
 }
 
-// PKCE flow: INITIAL_SESSION でページ読み込み時の自動ログイン復元も行う
+// セッション復元：INITIAL_SESSION（自動ログイン）＋ SIGNED_IN/OUT（手動操作）
+// implicitフローではリダイレクト後に必ずSIGNED_INが発火するためIIFE不要
+let sessionHandled = false;
 sb.auth.onAuthStateChange(async (event, session) => {
-  if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT'){
+  if(event === 'SIGNED_OUT'){
+    sessionHandled = false;
+    await restoreSession(null);
+    return;
+  }
+  if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN'){
+    if(sessionHandled && event === 'INITIAL_SESSION') return; // 重複防止
+    sessionHandled = true;
     await restoreSession(session);
   }
 });
