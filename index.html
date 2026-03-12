@@ -163,52 +163,25 @@ async function loadPlayers(){
 
 // ログイン済みセッションの復元処理（UBSアプリのonAuthStateChangedと同等の役割）
 async function restoreSession(session){
-  dbg(`restoreSession: user=${session?.user?.email ?? 'null'}`);
   user = session?.user ?? null;
   if(user){
     const invToken = sessionStorage.getItem('invite_token');
     if(invToken){ pendingInviteToken=invToken; sessionStorage.removeItem('invite_token'); }
     try {
       await loadMyTeams();
-      dbg(`loadMyTeams OK: ${myTeams.length} teams`);
     } catch(e) {
-      dbg(`loadMyTeams ERROR: ${e.message}`);
       view="login"; render(); return;
     }
     if(pendingInviteToken){ await handleInviteToken(pendingInviteToken); return; }
-    if(myTeams.length===0){ dbg('no teams → team_select'); view="team_select"; render(); }
-    else if(myTeams.length===1){ dbg(`selectTeam: ${myTeams[0].name}`); await selectTeam(myTeams[0]); dbg('selectTeam done'); }
-    else { dbg('multiple teams → team_select'); view="team_select"; render(); }
+    if(myTeams.length===0){ view="team_select"; render(); }
+    else if(myTeams.length===1){ await selectTeam(myTeams[0]); }
+    else { view="team_select"; render(); }
   } else {
     stopListeners();
     tournaments=[]; players=[]; currentTeam=null; myTeams=[];
     view="login"; render();
-    dbg('→ login screen (no user)');
   }
 }
-
-// ── DEBUG ────────────────────────────────────────────────────────────
-const _dbgLogs = [];
-function dbg(msg){
-  const t = new Date().toISOString().slice(11,23);
-  _dbgLogs.push(`[${t}] ${msg}`);
-  console.log(`[DBG] ${msg}`);
-  const el = document.getElementById('_dbg');
-  if(el) el.textContent = _dbgLogs.slice(-40).join('\n');
-}
-dbg('--- PAGE LOAD ---');
-dbg(`hash: "${location.hash.slice(0,50)}"`);
-try {
-  const raw = localStorage.getItem('minibasket-supabase-auth');
-  if(raw){
-    const p = JSON.parse(raw);
-    const diff = (p?.expires_at ?? 0) - Math.floor(Date.now()/1000);
-    dbg(`localStorage: user=${p?.user?.email}, expires_in=${diff}s`);
-  } else {
-    dbg('localStorage: NO SESSION');
-  }
-} catch(e){ dbg(`localStorage error: ${e.message}`); }
-// ── END DEBUG ─────────────────────────────────────────────────────────
 
 // ── Auth state management ────────────────────────────────────────────
 // 【重要】onAuthStateChange のコールバックは Supabase 内部の Web Lock を
@@ -222,27 +195,20 @@ try {
 // 代わりに「処理済みセッションの user_id」を記録し、同一ユーザーの重複イベントを弾く。
 let _handledUserId = null;
 sb.auth.onAuthStateChange((event, session) => {
-  dbg(`onAuthStateChange: ${event} / user=${session?.user?.email ?? 'null'}`);
-
   if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN'){
     const uid = session?.user?.id ?? null;
-    if(uid && uid === _handledUserId){
-      dbg(`skip duplicate event: ${event}`);
-      return;
-    }
+    if(uid && uid === _handledUserId){ return; }
     _handledUserId = uid;
     const _session = session;
     const _hasToken = window.location.hash.includes('access_token');
     setTimeout(async () => {
       if(event === 'SIGNED_IN' && _hasToken){
-        dbg('clearing access_token from URL hash');
         history.replaceState(null, '', window.location.pathname);
       }
       await restoreSession(_session ?? null);
     }, 0);
     return;
   }
-
   if(event === 'SIGNED_OUT'){
     _handledUserId = null;
     setTimeout(async () => {
@@ -250,16 +216,12 @@ sb.auth.onAuthStateChange((event, session) => {
     }, 0);
     return;
   }
-
-  dbg(`skip event: ${event}`);
 });
 
 async function loadMyTeams(){
-  dbg(`loadMyTeams start: user.id=${user?.id}`);
   const {data, error} = await sb.from('team_members')
     .select('team_id, role, teams(id,name,invite_token)')
     .eq('user_id', user.id);
-  dbg(`loadMyTeams result: data=${data?.length ?? 'null'}, error=${error?.message ?? 'none'}`);
   myTeams = (data||[]).map(m=>({
     id: m.teams.id,
     name: m.teams.name,
@@ -682,14 +644,12 @@ function build(){
   return wrap;
 }
 
-// ── Loading ───────────────────────────────────────────────────────────
-
 // ── Loading ──────────────────────────────────────────────────────────
 function buildLoading(){
-  const wrap=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#0f2744",minHeight:"100vh",gap:"16px"}});
+  const wrap=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#f1f5f9",minHeight:"100vh",gap:"16px"}});
   wrap.appendChild(el("div",{style:{fontSize:"48px"}},["🏀"]));
-  wrap.appendChild(el("div",{style:{fontSize:"18px",fontWeight:"700",color:"#fff"}},["ミニバスログ"]));
-  wrap.appendChild(el("div",{style:{fontSize:"13px",color:"rgba(255,255,255,0.5)",marginTop:"8px"}},["読み込み中..."]));
+  wrap.appendChild(el("div",{style:{fontSize:"18px",fontWeight:"700",color:"#0f2744"}},["ミニバスログ"]));
+  wrap.appendChild(el("div",{style:{fontSize:"13px",color:"#94a3b8",marginTop:"8px"}},["読み込み中..."]));
   return wrap;
 }
 
@@ -741,19 +701,10 @@ function buildLogin(){
   ]));
   // バージョン表示
   loginArea.appendChild(el("div",{style:{textAlign:"center",marginTop:"8px"}},[
-    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.0.06"])
+    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.1.00"])
   ]));
 
-  // デバッグパネル
-  const dbgWrap = el("div",{style:{marginTop:"16px"}});
-  const dbgBtn = el("button",{
-    style:{width:"100%",background:"#1e293b",color:"#64748b",border:"none",borderRadius:"8px",padding:"6px",fontSize:"11px",cursor:"pointer"},
-    onClick:()=>{ const p=document.getElementById('_dbg'); p.style.display=p.style.display==='none'?'block':'none'; }
-  },["🔍 debug"]);
-  const dbgPanel = el("pre",{id:"_dbg",style:{display:"none",marginTop:"6px",background:"#0f172a",color:"#4ade80",fontSize:"10px",padding:"8px",borderRadius:"6px",overflowX:"auto",whiteSpace:"pre-wrap",wordBreak:"break-all",maxHeight:"280px",overflowY:"auto"}},[_dbgLogs.join('\n')]);
-  dbgWrap.appendChild(dbgBtn);
-  dbgWrap.appendChild(dbgPanel);
-  loginArea.appendChild(dbgWrap);
+
   wrap.appendChild(loginArea);
 
   return wrap;
