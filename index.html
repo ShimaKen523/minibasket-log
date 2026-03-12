@@ -169,15 +169,10 @@ async function restoreSession(session){
   }
 }
 
-// ページ読み込み時に即座にセッション確認（自動ログイン）
-(async()=>{
-  const {data:{session}} = await sb.auth.getSession();
-  await restoreSession(session);
-})();
-
-// ログイン・ログアウト操作時のみ反応
+// INITIAL_SESSION：ページ読み込み時の自動ログイン復元
+// SIGNED_IN / SIGNED_OUT：ログイン・ログアウト操作時
 sb.auth.onAuthStateChange(async (event, session) => {
-  if(event === 'SIGNED_IN' || event === 'SIGNED_OUT'){
+  if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT'){
     await restoreSession(session);
   }
 });
@@ -208,7 +203,10 @@ async function selectTeam(team){
 async function login(){
   const {error} = await sb.auth.signInWithOAuth({
     provider:'google',
-    options:{ redirectTo: window.location.href }
+    options:{
+      redirectTo: window.location.href,
+      queryParams: { prompt: 'select_account' }
+    }
   });
   if(error) alert("ログイン失敗: "+error.message);
 }
