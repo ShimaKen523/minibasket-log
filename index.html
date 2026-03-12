@@ -199,18 +199,18 @@ try {
 } catch(e){ dbg(`localStorage error: ${e.message}`); }
 // ── END DEBUG ─────────────────────────────────────────────────────────
 
-// セッション復元：INITIAL_SESSION（自動ログイン）＋ SIGNED_IN/OUT（手動操作）
-let sessionHandled = false;
+// 起動時にgetSession()で即時復元（onAuthStateChangeの5秒待ちを回避）
+(async()=>{
+  dbg('getSession() start');
+  const {data:{session}, error} = await sb.auth.getSession();
+  dbg(`getSession() done: user=${session?.user?.email ?? 'null'}, error=${error?.message ?? 'none'}`);
+  await restoreSession(session);
+})();
+
+// ログアウト・再ログイン時のみ反応
 sb.auth.onAuthStateChange(async (event, session) => {
   dbg(`onAuthStateChange: ${event} / user=${session?.user?.email ?? 'null'}`);
-  if(event === 'SIGNED_OUT'){
-    sessionHandled = false;
-    await restoreSession(null);
-    return;
-  }
-  if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN'){
-    if(sessionHandled && event === 'INITIAL_SESSION'){ dbg('skip duplicate INITIAL_SESSION'); return; }
-    sessionHandled = true;
+  if(event === 'SIGNED_OUT' || event === 'SIGNED_IN'){
     await restoreSession(session);
   }
 });
