@@ -66,7 +66,18 @@ let currentTeam  = null; // {id, name, invite_token, role}
 let myTeams      = [];   // [{id,name,invite_token,role}]
 let tournaments  = [];
 let players      = [];
-let view         = "login";
+// localStorageのセッションを同期で先読みし、初期viewを決定する
+// （onAuthStateChangeが発火するまでの一瞬、ログイン画面がちらつくのを防ぐ）
+let _initialView = "login";
+try {
+  const _raw = localStorage.getItem('minibasket-supabase-auth');
+  if(_raw){
+    const _p = JSON.parse(_raw);
+    const _diff = (_p?.expires_at ?? 0) - Math.floor(Date.now()/1000);
+    if(_p?.user && _diff > 0) _initialView = "loading";
+  }
+} catch(e){}
+let view = _initialView;
 // team screens
 let newTeamName  = "";
 let newTeamError = "";
@@ -203,15 +214,26 @@ try {
 // 【重要】onAuthStateChange のコールバックは Supabase 内部の Web Lock を
 // 保持したまま呼ばれる。このコールバック内で Supabase クエリを await すると
 // lock が5秒タイムアウト → AbortError になる。
-// 解決策: setTimeout(fn, 0) でコールバックの外（lockが解放された後）に処理を逃がす。
+// 解決策: setTimeout(fn, 0) でlockが解放された後に処理を逃がす。
+//
+// 【二重実行防止】
+// SIGNED_IN と INITIAL_SESSION が連続して同期的に発火するため boolean フラグでは
+// setTimeout 実行前にすり抜けてしまう。
+// 代わりに「処理済みセッションの user_id」を記録し、同一ユーザーの重複イベントを弾く。
+let _handledUserId = null;
 sb.auth.onAuthStateChange((event, session) => {
   dbg(`onAuthStateChange: ${event} / user=${session?.user?.email ?? 'null'}`);
 
   if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN'){
+    const uid = session?.user?.id ?? null;
+    if(uid && uid === _handledUserId){
+      dbg(`skip duplicate event: ${event}`);
+      return;
+    }
+    _handledUserId = uid;
     const _session = session;
     const _hasToken = window.location.hash.includes('access_token');
     setTimeout(async () => {
-      // URLハッシュのトークン消去（SIGNED_IN時のみ必要、lockの外で実行）
       if(event === 'SIGNED_IN' && _hasToken){
         dbg('clearing access_token from URL hash');
         history.replaceState(null, '', window.location.pathname);
@@ -222,6 +244,7 @@ sb.auth.onAuthStateChange((event, session) => {
   }
 
   if(event === 'SIGNED_OUT'){
+    _handledUserId = null;
     setTimeout(async () => {
       await restoreSession(null);
     }, 0);
@@ -641,6 +664,7 @@ function mkEscortRows(body){
 // ── Build ─────────────────────────────────────────────────────────────
 function build(){
   const wrap=el("div",{style:S.root});
+  if(view==="loading"){     wrap.appendChild(buildLoading());     return wrap;}
   if(view==="login"){      wrap.appendChild(buildLogin());      return wrap;}
   if(view==="team_select"){wrap.appendChild(buildTeamSelect()); return wrap;}
   if(view==="join_confirm"){wrap.appendChild(buildJoinConfirm());return wrap;}
@@ -659,6 +683,15 @@ function build(){
 }
 
 // ── Loading ───────────────────────────────────────────────────────────
+
+// ── Loading ──────────────────────────────────────────────────────────
+function buildLoading(){
+  const wrap=el("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#0f2744",minHeight:"100vh",gap:"16px"}});
+  wrap.appendChild(el("div",{style:{fontSize:"48px"}},["🏀"]));
+  wrap.appendChild(el("div",{style:{fontSize:"18px",fontWeight:"700",color:"#fff"}},["ミニバスログ"]));
+  wrap.appendChild(el("div",{style:{fontSize:"13px",color:"rgba(255,255,255,0.5)",marginTop:"8px"}},["読み込み中..."]));
+  return wrap;
+}
 
 // ── Login ─────────────────────────────────────────────────────────────
 function buildLogin(){
@@ -708,7 +741,7 @@ function buildLogin(){
   ]));
   // バージョン表示
   loginArea.appendChild(el("div",{style:{textAlign:"center",marginTop:"8px"}},[
-    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.0.04"])
+    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.0.06"])
   ]));
 
   // デバッグパネル
