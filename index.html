@@ -200,31 +200,31 @@ try {
 // ── END DEBUG ─────────────────────────────────────────────────────────
 
 // ── Auth state management ────────────────────────────────────────────
-// onAuthStateChange に一本化。getSession() との並走によるlockハングを排除する。
-// Supabase v2 では INITIAL_SESSION がページロード時のセッション復元を担うため
-// 別途 getSession() を呼ぶ必要はない。
-sb.auth.onAuthStateChange(async (event, session) => {
+// 【重要】onAuthStateChange のコールバックは Supabase 内部の Web Lock を
+// 保持したまま呼ばれる。このコールバック内で Supabase クエリを await すると
+// lock が5秒タイムアウト → AbortError になる。
+// 解決策: setTimeout(fn, 0) でコールバックの外（lockが解放された後）に処理を逃がす。
+sb.auth.onAuthStateChange((event, session) => {
   dbg(`onAuthStateChange: ${event} / user=${session?.user?.email ?? 'null'}`);
 
-  if(event === 'INITIAL_SESSION'){
-    // ページロード時（リロード含む）のセッション復元
-    await restoreSession(session ?? null);
-    return;
-  }
-
-  if(event === 'SIGNED_IN'){
-    // Googleログイン後のリダイレクト完了
-    await restoreSession(session);
-    // セッション確立後にURLハッシュからトークンを消去
-    if(window.location.hash.includes('access_token')){
-      dbg('clearing access_token from URL hash');
-      history.replaceState(null, '', window.location.pathname);
-    }
+  if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN'){
+    const _session = session;
+    const _hasToken = window.location.hash.includes('access_token');
+    setTimeout(async () => {
+      // URLハッシュのトークン消去（SIGNED_IN時のみ必要、lockの外で実行）
+      if(event === 'SIGNED_IN' && _hasToken){
+        dbg('clearing access_token from URL hash');
+        history.replaceState(null, '', window.location.pathname);
+      }
+      await restoreSession(_session ?? null);
+    }, 0);
     return;
   }
 
   if(event === 'SIGNED_OUT'){
-    await restoreSession(null);
+    setTimeout(async () => {
+      await restoreSession(null);
+    }, 0);
     return;
   }
 
@@ -708,7 +708,7 @@ function buildLogin(){
   ]));
   // バージョン表示
   loginArea.appendChild(el("div",{style:{textAlign:"center",marginTop:"8px"}},[
-    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.0.03"])
+    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.0.04"])
   ]));
 
   // デバッグパネル
