@@ -47,6 +47,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
+    lock: async (name, acquireTimeout, fn) => fn(),
   }
 });
 
@@ -199,7 +200,7 @@ try {
 } catch(e){ dbg(`localStorage error: ${e.message}`); }
 // ── END DEBUG ─────────────────────────────────────────────────────────
 
-// 起動時にgetSession()で即時復元（onAuthStateChangeの5秒待ちを回避）
+// getSession()でlocalStorageから直接セッション取得（lockを経由しないため競合しない）
 (async()=>{
   dbg('getSession() start');
   const {data:{session}, error} = await sb.auth.getSession();
@@ -207,7 +208,7 @@ try {
   await restoreSession(session);
 })();
 
-// ログアウト・再ログイン時のみ反応
+// ログアウト・再ログイン時のみonAuthStateChangeを使う
 sb.auth.onAuthStateChange(async (event, session) => {
   dbg(`onAuthStateChange: ${event} / user=${session?.user?.email ?? 'null'}`);
   if(event === 'SIGNED_OUT' || event === 'SIGNED_IN'){
