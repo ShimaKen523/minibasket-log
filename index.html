@@ -1,165 +1,54 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
-<title>ミニバスログ | MiniBasketLog</title>
-<link rel="manifest" href="/manifest.json"/>
-<meta name="theme-color" content="#0f2744"/>
-<meta name="mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="ミニバスログ"/>
-<link rel="icon" href="/favicon.ico" type="image/x-icon"/>
-<link rel="apple-touch-icon" href="/icon-192.png"/>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:'Hiragino Sans','Noto Sans JP',sans-serif;background:#0f2744;color:#fff;line-height:1.6;overflow-x:hidden;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
-  #app{max-width:500px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding:20px;position:relative;}
-  .btn{display:inline-block;padding:12px 24px;border-radius:12px;border:none;cursor:pointer;font-weight:700;font-size:16px;text-align:center;transition:all 0.2s ease;font-family:inherit;}
-  .btn-primary{background:linear-gradient(135deg,#fcd34d,#fbbf24);color:#0f2744;box-shadow:0 4px 12px rgba(251,191,36,0.3);}
-  .card{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:20px;padding:20px;margin-bottom:16px;}
-  .loading{display:flex;justify-content:center;align-items:center;height:100px;font-size:14px;opacity:0.7;}
-  #debug-console{font-size:10px;color:#00ff00;background:#000;padding:10px;margin-top:20px;border-radius:8px;max-height:150px;overflow-y:auto;display:none;border:1px solid #333;}
-</style>
-</head>
-<body>
-<div id="app">
-  <div id="main-content">
-    <div class="loading">読込中...</div>
-  </div>
-  <div id="debug-console"></div>
-</div>
-
-<script>
-// --- 設定 ---
-const SUPABASE_URL = "https://mnyidxtpkhvmsogzqqyv.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ueWlkeHRwa2h2bXNvZ3pxcXl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDEyMzMzMTcsImV4cCI6MjA1NjgwOTMxN30.S6vS_0tOOfYpD7h-2fH92_7Xp_9Yf5vS_0tOOfYpD7h";
-
+// --- 安定版の認証ロジック ---
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    flowType: 'implicit' // エラー回避のため一旦元のフローに戻します
+    flowType: 'implicit' // Pages.dev環境で最も安定します
   }
 });
 
-let user = null;
-let view = "loading";
-let myTeams = [];
-
-function dbg(msg) {
-  const c = document.getElementById("debug-console");
-  if(!c) return;
-  const now = new Date();
-  const ts = now.getHours().toString().padStart(2,'0')+":"+now.getMinutes().toString().padStart(2,'0')+":"+now.getSeconds().toString().padStart(2,'0');
-  c.innerHTML += `<div>[${ts}] ${msg}</div>`;
-  c.scrollTop = c.scrollHeight;
-  console.log(`[DBG] ${msg}`);
-}
-
-// ── 初期化ロジック ──
+// 1. 起動時のチェック
 async function initApp() {
   dbg("Checking session...");
-  
-  // 1. 現在のセッションを取得
-  const { data: { session }, error } = await sb.auth.getSession();
+  const { data: { session } } = await sb.auth.getSession();
   
   if (session) {
-    // ログイン済みの場合
     await restoreSession(session);
   } else {
-    // 未ログインの場合、またはログイン試行中（URLにハッシュがある）
-    if (window.location.hash.includes('access_token')) {
-      dbg("Found token in URL, waiting for auth event...");
-      // ハッシュがある場合は onAuthStateChange で処理されるのを待つ
-    } else {
-      showLogin();
-    }
+    // ログイン直後でURLにトークンがある場合、onAuthStateChangeが拾うのを少し待つ
+    setTimeout(() => {
+      if (view === "loading") {
+        view = "login";
+        render();
+      }
+    }, 1500); 
   }
 }
 
-// ── 認証状態の監視 ──
+// 2. 認証状態の変化を監視
 sb.auth.onAuthStateChange(async (event, session) => {
   dbg(`AuthEvent: ${event}`);
 
-  if (event === 'SIGNED_IN') {
-    // ログイン成功直後、URLのハッシュを消去（リロード対策）
+  if (event === 'SIGNED_IN' && session) {
+    // URLのゴミ（#access_token...）を消去してリロード対策
     if (window.location.hash.includes('access_token')) {
       history.replaceState(null, '', window.location.pathname);
     }
     await restoreSession(session);
   } else if (event === 'SIGNED_OUT') {
-    showLogin();
+    view = "login";
+    render();
   }
 });
 
 async function restoreSession(session) {
-  if (!session) return;
   user = session.user;
-  dbg(`User: ${user.email}`);
-  await loadMyTeams();
+  dbg(`Signed in as: ${user.email}`);
+  // ここでデータ取得など
   view = "team_select";
   render();
 }
 
-function showLogin() {
-  view = "login";
-  render();
-}
-
-async function login() {
-  dbg("Google Login Start...");
-  await sb.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: window.location.origin + window.location.pathname
-    }
-  });
-}
-
-async function logout() {
-  await sb.auth.signOut();
-  location.reload();
-}
-
-async function loadMyTeams() {
-  dbg("Loading data...");
-  // データの読み込み処理
-}
-
-function render() {
-  const main = document.getElementById("main-content");
-  if (view === "login") {
-    main.innerHTML = `
-      <div style="text-align:center;padding:40px 0;">
-        <h1 style="font-size:28px;margin-bottom:10px;">ミニバスログ</h1>
-        <button class="btn btn-primary" onclick="login()">Googleでログイン</button>
-      </div>
-    `;
-  } else if (view === "team_select") {
-    main.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-        <h3>マイチーム</h3>
-        <button onclick="logout()" style="background:none;border:none;color:#fff;font-size:12px;text-decoration:underline;cursor:pointer;">ログアウト</button>
-      </div>
-      <div class="card">
-        <p style="text-align:center;font-size:14px;opacity:0.6;">チームがありません</p>
-      </div>
-    `;
-  }
-}
-
-// 起動
 initApp();
-
-// デバッグコンソール表示
-if (location.hostname === 'localhost' || location.hostname.includes('cloudflare.dev') || location.hostname.includes('127.0.0.1')) {
-  document.getElementById("debug-console").style.display = "block";
-}
-</script>
-</body>
-</html>
