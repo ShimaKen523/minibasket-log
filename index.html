@@ -200,34 +200,46 @@ try {
 } catch(e){ dbg(`localStorage error: ${e.message}`); }
 // ── END DEBUG ─────────────────────────────────────────────────────────
 
-// セッション復元
-// SIGNED_INはRealtimeチャンネル接続時にも再発火するため、
-// currentUserIdで同一ユーザーの2回目以降をスキップする
+// URLに残る#access_tokenを消去（リロード時の再処理防止）
+if(window.location.hash.includes('access_token')){
+  dbg('clearing access_token from URL hash');
+  history.replaceState(null, '', window.location.pathname);
+}
+
+// onAuthStateChangeはSIGNED_OUTとログインボタン押下後のSIGNED_INのみ使用
+// （Realtimeチャンネル接続時の再発火やlockの競合を避けるため）
 let currentUserId = null;
 sb.auth.onAuthStateChange(async (event, session) => {
   dbg(`onAuthStateChange: ${event} / user=${session?.user?.email ?? 'null'}`);
-
-  // ログイン後にURLに残る#access_tokenを消去（残っているとリロード時に再処理される）
-  if(window.location.hash.includes('access_token')){
-    dbg('clearing access_token from URL hash');
-    history.replaceState(null, '', window.location.pathname);
-  }
-
   if(event === 'SIGNED_OUT'){
     currentUserId = null;
     await restoreSession(null);
     return;
   }
-  if(event === 'INITIAL_SESSION' || event === 'SIGNED_IN'){
-    const newUserId = session?.user?.id ?? null;
-    if(currentUserId && currentUserId === newUserId){
-      dbg(`skip: already logged in as ${newUserId}`);
-      return;
-    }
-    currentUserId = newUserId;
+  // SIGNED_IN: ハッシュにaccess_tokenがある場合＝ログインボタン直後のリダイレクト
+  // それ以外のSIGNED_IN（Realtime再接続など）は無視
+  if(event === 'SIGNED_IN' && !currentUserId){
+    dbg('SIGNED_IN from login redirect, handling...');
+    currentUserId = session?.user?.id ?? null;
     await restoreSession(session);
+    return;
   }
+  dbg(`skip event: ${event}`);
 });
+
+// ページ読み込み時: lockを経由しないgetSession()で即時セッション確認
+// （onAuthStateChangeのlock待ちを回避）
+(async()=>{
+  dbg('getSession() start');
+  const {data:{session}, error} = await sb.auth.getSession();
+  dbg(`getSession() result: user=${session?.user?.email ?? 'null'}, error=${error?.message ?? 'none'}`);
+  if(session?.user){
+    currentUserId = session.user.id;
+    await restoreSession(session);
+  } else {
+    await restoreSession(null);
+  }
+})();
 
 async function loadMyTeams(){
   dbg(`loadMyTeams start: user.id=${user?.id}`);
