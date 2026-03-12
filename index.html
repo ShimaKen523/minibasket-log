@@ -206,38 +206,63 @@ if(window.location.hash.includes('access_token')){
   history.replaceState(null, '', window.location.pathname);
 }
 
-// onAuthStateChangeはSIGNED_OUTとログインボタン押下後のSIGNED_INのみ使用
-// （Realtimeチャンネル接続時の再発火やlockの競合を避けるため）
+// onAuthStateChange: SIGNED_OUT は即時処理、セッションありは二重実行防止フラグで管理
+// TOKEN_REFRESHED / INITIAL_SESSION などリロード時の全イベントを安全に処理する
 let currentUserId = null;
+let _sessionHandled = false;
+
 sb.auth.onAuthStateChange(async (event, session) => {
   dbg(`onAuthStateChange: ${event} / user=${session?.user?.email ?? 'null'}`);
+
   if(event === 'SIGNED_OUT'){
     currentUserId = null;
+    _sessionHandled = false;
     await restoreSession(null);
     return;
   }
-  // SIGNED_IN: ハッシュにaccess_tokenがある場合＝ログインボタン直後のリダイレクト
-  // それ以外のSIGNED_IN（Realtime再接続など）は無視
-  if(event === 'SIGNED_IN' && !currentUserId){
-    dbg('SIGNED_IN from login redirect, handling...');
-    currentUserId = session?.user?.id ?? null;
-    await restoreSession(session);
+
+  if(session?.user){
+    // ユーザーが切り替わった場合はフラグをリセット
+    if(session.user.id !== currentUserId){
+      currentUserId = session.user.id;
+      _sessionHandled = false;
+    }
+    if(!_sessionHandled){
+      _sessionHandled = true;
+      dbg(`handling session via onAuthStateChange (${event})`);
+      await restoreSession(session);
+    } else {
+      dbg(`skip event (already handled): ${event}`);
+    }
     return;
   }
-  dbg(`skip event: ${event}`);
+
+  dbg(`skip event (no session): ${event}`);
 });
 
-// ページ読み込み時: lockを経由しないgetSession()で即時セッション確認
-// （onAuthStateChangeのlock待ちを回避）
+// ページ読み込み時: getSession()で即時セッション確認
+// onAuthStateChangeより先に発火した場合はこちらで処理、後なら _sessionHandled でスキップ
 (async()=>{
   dbg('getSession() start');
   const {data:{session}, error} = await sb.auth.getSession();
   dbg(`getSession() result: user=${session?.user?.email ?? 'null'}, error=${error?.message ?? 'none'}`);
   if(session?.user){
-    currentUserId = session.user.id;
-    await restoreSession(session);
+    if(session.user.id !== currentUserId){
+      currentUserId = session.user.id;
+      _sessionHandled = false;
+    }
+    if(!_sessionHandled){
+      _sessionHandled = true;
+      dbg('handling session via getSession()');
+      await restoreSession(session);
+    } else {
+      dbg('getSession(): session already handled by onAuthStateChange, skip');
+    }
   } else {
-    await restoreSession(null);
+    if(!_sessionHandled){
+      _sessionHandled = true;
+      await restoreSession(null);
+    }
   }
 })();
 
@@ -716,6 +741,11 @@ function buildLogin(){
   loginArea.appendChild(el("div",{style:{textAlign:"center",marginTop:"16px"}},[
     el("a",{href:"/privacy.html",style:{fontSize:"12px",color:"#94a3b8",textDecoration:"none"},target:"_blank"},["プライバシーポリシー"])
   ]));
+  // バージョン表示
+  loginArea.appendChild(el("div",{style:{textAlign:"center",marginTop:"8px"}},[
+    el("span",{style:{fontSize:"11px",color:"#cbd5e1",letterSpacing:"0.5px"}},["v1.0.00"])
+  ]));
+
   // デバッグパネル
   const dbgWrap = el("div",{style:{marginTop:"16px"}});
   const dbgBtn = el("button",{
