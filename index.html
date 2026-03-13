@@ -106,6 +106,8 @@ let sf = {};
 // invite handling
 let pendingInviteToken = null;
 let pendingTeamInfo    = null; // {id,name} for confirm UI
+let inviteRole         = "member"; // "member" | "admin"
+let pendingInviteRole  = "member"; // role carried through invite flow
 
 // ── Supabase realtime ────────────────────────────────────────────────
 let realtimeSubs = [];
@@ -166,7 +168,7 @@ async function restoreSession(session){
   user = session?.user ?? null;
   if(user){
     const invToken = sessionStorage.getItem('invite_token');
-    if(invToken){ pendingInviteToken=invToken; sessionStorage.removeItem('invite_token'); }
+    if(invToken){ pendingInviteToken=invToken; pendingInviteRole=sessionStorage.getItem('invite_role')||'member'; sessionStorage.removeItem('invite_token'); sessionStorage.removeItem('invite_role'); }
     try {
       await loadMyTeams();
     } catch(e) {
@@ -262,12 +264,15 @@ function checkUrlForInvite(){
   const params = new URLSearchParams(window.location.search);
   const token  = params.get('invite');
   if(token){
+    const role = params.get('role') || 'member';
     // URLからトークンを取り除く
     const url = new URL(window.location.href);
     url.searchParams.delete('invite');
+    url.searchParams.delete('role');
     history.replaceState(null,'',url.toString());
+    pendingInviteRole = role;
     if(user){ pendingInviteToken=token; handleInviteToken(token); }
-    else { sessionStorage.setItem('invite_token',token); }
+    else { sessionStorage.setItem('invite_token',token); sessionStorage.setItem('invite_role',role); }
   }
 }
 
@@ -290,12 +295,14 @@ async function handleInviteToken(token){
 
 async function joinTeam(){
   if(!pendingTeamInfo) return;
+  const role = pendingInviteRole || 'member';
   const {error} = await sb.from('team_members')
-    .insert({team_id:pendingTeamInfo.id, user_id:user.id, role:'member'});
+    .insert({team_id:pendingTeamInfo.id, user_id:user.id, role:role});
   if(error){ joinTeamError="参加に失敗しました: "+error.message; render(); return; }
   await loadMyTeams();
   const joined = myTeams.find(t=>t.id===pendingTeamInfo.id);
   pendingTeamInfo=null;
+  pendingInviteRole="member";
   if(joined) await selectTeam(joined);
 }
 
@@ -438,7 +445,8 @@ async function saveStats(){
 
 // ── Invite link ──────────────────────────────────────────────────────
 function getInviteLink(){
-  return `${window.location.origin}${window.location.pathname}?invite=${currentTeam.invite_token}`;
+  const role = inviteRole || "member";
+  return `${window.location.origin}${window.location.pathname}?invite=${currentTeam.invite_token}&role=${role}`;
 }
 function copyInviteLink(){
   navigator.clipboard.writeText(getInviteLink()).then(()=>alert("招待リンクをコピーしました！"));
@@ -763,6 +771,7 @@ function buildJoinConfirm(){
     el("div",{style:{fontSize:"48px"}},["🏀"]),
     el("div",{style:{fontSize:"20px",fontWeight:"800",color:"#0f2744",textAlign:"center"}},[`「${pendingTeamInfo?.name}」に参加しますか？`]),
     el("div",{style:{fontSize:"14px",color:"#6b7280",textAlign:"center"}},["招待リンクでこのチームへの参加を求められています"]),
+    el("div",{style:{fontSize:"13px",color:"#0f2744",fontWeight:"700",textAlign:"center",marginTop:"-8px"}},[(pendingInviteRole==="admin"?"👑 管理者":"👤 メンバー")+" として参加します"]),
     joinTeamError?el("div",{style:{color:"#dc2626",fontSize:"13px"}},[joinTeamError]):null,
     el("div",{style:{display:"flex",flexDirection:"column",gap:"10px",width:"100%",maxWidth:"340px"}},[
       mkBtn("参加する",joinTeam),
@@ -784,7 +793,7 @@ function buildList(){
   const userWrap=el("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
   userWrap.appendChild(el("span",{style:{fontSize:"12px",opacity:"0.7"}},[isAdmin?"✏️管理者":"👁閲覧"]));
   userWrap.appendChild(el("button",{
-    style:{background:"rgba(255,255,255,0.15)",border:"none",color:"rgba(255,255,255,0.8)",borderRadius:"8px",padding:"5px 10px",fontSize:"11px",cursor:"pointer",fontFamily:"inherit"},
+    style:{background:"rgba(255,255,255,0.15)",border:"none",color:"rgba(255,255,255,0.8)",borderRadius:"8px",padding:"5px 10px",fontSize:"18px",cursor:"pointer",fontFamily:"inherit",lineHeight:"1"},
     onClick:()=>{view="settings";render();}
   },["⚙"]));
   titleRow.appendChild(userWrap);
@@ -1473,7 +1482,18 @@ function buildSettings(){
   if(isAdmin){
     body.appendChild(el("div",{style:{fontSize:"13px",fontWeight:"700",color:"#6b7280",marginBottom:"10px"}},["メンバーを招待"]));
     const invCard=el("div",{style:{background:"#fff",borderRadius:"14px",padding:"16px",marginBottom:"20px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}});
-    invCard.appendChild(el("div",{style:{fontSize:"13px",color:"#374151",marginBottom:"12px"}},["下のリンクを共有するとチームに参加できます。リンクは無期限に有効です。"]));
+    invCard.appendChild(el("div",{style:{fontSize:"13px",color:"#374151",marginBottom:"12px"}},["下のリンクを共有するとチームに参加できます。リンクは10日間有効です。"]));
+    // 招待権限選択
+    const roleWrap=el("div",{style:{display:"flex",gap:"8px",marginBottom:"12px"}});
+    ["member","admin"].forEach(r=>{
+      const active=(inviteRole||"member")===r;
+      const btn=el("button",{
+        style:{flex:"1",padding:"7px 0",borderRadius:"8px",border:"1.5px solid "+(active?"#0f2744":"#e5e7eb"),background:active?"#0f2744":"#fff",color:active?"#fff":"#374151",fontSize:"13px",fontWeight:active?"700":"400",cursor:"pointer",fontFamily:"inherit"},
+        onClick:()=>{inviteRole=r;render();}
+      },[r==="admin"?"👑 管理者":"👤 メンバー"]);
+      roleWrap.appendChild(btn);
+    });
+    invCard.appendChild(roleWrap);
     const linkBox=el("div",{style:{background:"#f8fafc",borderRadius:"10px",padding:"10px 12px",fontSize:"12px",color:"#6b7280",wordBreak:"break-all",marginBottom:"12px",border:"1px solid #e5e7eb"}},[getInviteLink()]);
     invCard.appendChild(linkBox);
     invCard.appendChild(mkBtn("📋 招待リンクをコピー",copyInviteLink));
