@@ -25,13 +25,12 @@
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'Hiragino Sans','Noto Sans JP',sans-serif;background:#f1f5f9;min-height:100vh;}
   #root{max-width:430px;margin:0 auto;position:relative;}
-  .fab-wrap{position:sticky;bottom:0;height:0;overflow:visible;pointer-events:none;}
-  .fab-btn{position:absolute;bottom:24px;right:16px;pointer-events:auto;}
   input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
 </style>
 </head>
 <body>
 <div id="root"></div>
+<button id="global-fab" style="display:none;position:fixed;bottom:24px;width:56px;height:56px;border-radius:50%;background:#0f2744;color:#fff;font-size:26px;border:none;box-shadow:0 4px 16px rgba(15,39,68,0.45);cursor:pointer;align-items:center;justify-content:center;z-index:100;font-family:inherit;">＋</button>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script type="module">
@@ -500,12 +499,32 @@ window.dismissPwaBanner=dismissPwaBanner;
 window.triggerAndroidInstall=triggerAndroidInstall;
 
 // FABボタン（PC/スマホ両対応: sticky wrapper で #root 内右下に固定）
+// FABボタン（画面最下部固定・#root右端に揃える）
+let _fabCleanup=null;
 function mkFab(onClick){
-  const wrap=el("div",{style:{position:"sticky",bottom:"0",height:"0",overflow:"visible",pointerEvents:"none",zIndex:"100"}});
-  const btn=el("button",{style:{...S.fab,position:"absolute",bottom:"24px",right:"16px",pointerEvents:"auto"},onClick});
-  btn.appendChild(document.createTextNode("＋"));
-  wrap.appendChild(btn);
-  return wrap;
+  const fab=document.getElementById("global-fab");
+  if(!fab) return el("span",{});
+  // 前回のリスナーをクリア
+  if(_fabCleanup){ _fabCleanup(); _fabCleanup=null; }
+  // right位置を #root 右端に合わせる
+  function alignFab(){
+    const root=document.getElementById("root");
+    if(!root) return;
+    const rect=root.getBoundingClientRect();
+    const right=window.innerWidth-rect.right;
+    fab.style.right=Math.max(right+16,16)+"px";
+  }
+  alignFab();
+  window.addEventListener("resize",alignFab);
+  fab.style.display="flex";
+  const handler=onClick;
+  fab.addEventListener("click",handler);
+  _fabCleanup=()=>{
+    window.removeEventListener("resize",alignFab);
+    fab.removeEventListener("click",handler);
+    fab.style.display="none";
+  };
+  return el("span",{}); // プレースホルダー（DOMには何も追加しない）
 }
 
 // ── Render ────────────────────────────────────────────────────────────
@@ -513,6 +532,8 @@ function render(){
   const root=document.getElementById("root");
   const focused=document.activeElement;
   const wasSearch=focused&&focused.placeholder==="相手チームを検索";
+  // FABをリセット（mkFabが再セットアップする）
+  if(_fabCleanup){ _fabCleanup(); _fabCleanup=null; }
   root.innerHTML="";
   root.appendChild(build());
   if(wasSearch){
