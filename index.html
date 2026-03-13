@@ -24,7 +24,9 @@
 <style>
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'Hiragino Sans','Noto Sans JP',sans-serif;background:#f1f5f9;min-height:100vh;}
-  #root{max-width:430px;margin:0 auto;}
+  #root{max-width:430px;margin:0 auto;position:relative;}
+  .fab-wrap{position:sticky;bottom:0;height:0;overflow:visible;pointer-events:none;}
+  .fab-btn{position:absolute;bottom:24px;right:16px;pointer-events:auto;}
   input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
 </style>
 </head>
@@ -478,6 +480,8 @@ window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredPro
 function shouldShowPwaBanner(){
   if(window.matchMedia("(display-mode: standalone)").matches) return false;
   if(window.navigator.standalone===true) return false;
+  // PCでは表示しない（タッチ非対応かつ横幅768px以上）
+  if(!window.matchMedia("(pointer: coarse)").matches && window.innerWidth>=768) return false;
   const count=parseInt(localStorage.getItem("loginCount")||"0")+1;
   localStorage.setItem("loginCount",String(count));
   return count%5===0;
@@ -494,6 +498,15 @@ async function triggerAndroidInstall(){
 }
 window.dismissPwaBanner=dismissPwaBanner;
 window.triggerAndroidInstall=triggerAndroidInstall;
+
+// FABボタン（PC/スマホ両対応: sticky wrapper で #root 内右下に固定）
+function mkFab(onClick){
+  const wrap=el("div",{style:{position:"sticky",bottom:"0",height:"0",overflow:"visible",pointerEvents:"none",zIndex:"100"}});
+  const btn=el("button",{style:{...S.fab,position:"absolute",bottom:"24px",right:"16px",pointerEvents:"auto"},onClick});
+  btn.appendChild(document.createTextNode("＋"));
+  wrap.appendChild(btn);
+  return wrap;
+}
 
 // ── Render ────────────────────────────────────────────────────────────
 function render(){
@@ -544,7 +557,7 @@ const S={
   tc:{background:"#fff",borderRadius:"14px",padding:"14px 14px 10px",marginBottom:"12px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",cursor:"pointer"},
   gc:{background:"#fff",borderRadius:"12px",padding:"12px 14px",marginBottom:"10px",display:"flex",alignItems:"flex-start",gap:"12px",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"},
   bdg:{width:"34px",height:"34px",borderRadius:"9px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",fontWeight:"900",flexShrink:"0"},
-  fab:{position:"fixed",bottom:"24px",right:"24px",width:"56px",height:"56px",borderRadius:"50%",background:"#0f2744",color:"#fff",fontSize:"26px",border:"none",boxShadow:"0 4px 16px rgba(15,39,68,0.45)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:"100"},
+  fab:{width:"56px",height:"56px",borderRadius:"50%",background:"#0f2744",color:"#fff",fontSize:"26px",border:"none",boxShadow:"0 4px 16px rgba(15,39,68,0.45)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:"100"},
   lbl:{fontSize:"13px",color:"#6b7280",fontWeight:"600",marginBottom:"5px",display:"block"},
   inp:{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:"10px",padding:"12px 14px",fontSize:"16px",marginBottom:"12px",boxSizing:"border-box",color:"#1f2937",outline:"none",fontFamily:"inherit"},
   bp:{width:"100%",background:"#0f2744",color:"#fff",border:"none",borderRadius:"12px",padding:"15px",fontSize:"16px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit",marginBottom:"0"},
@@ -901,7 +914,7 @@ function buildList(){
     });
   }
   wrap.appendChild(body);
-  if(isAdmin) wrap.appendChild(el("button",{style:S.fab,onClick:()=>{view="at";render();}},["＋"]));
+  if(isAdmin) wrap.appendChild(mkFab(()=>{view="at";render();}));
   return wrap;
 }
 
@@ -981,7 +994,7 @@ function buildTD(){
     },["🗑 この大会を削除"]));
   }
   wrap.appendChild(body);
-  if(isAdmin) wrap.appendChild(el("button",{style:S.fab,onClick:()=>{view="ag";render();}},["＋"]));
+  if(isAdmin) wrap.appendChild(mkFab(()=>{view="ag";render();}));
   return wrap;
 }
 
