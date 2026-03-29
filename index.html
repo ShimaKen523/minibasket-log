@@ -164,7 +164,7 @@ async function loadPlayers(){
 
 // ── Auth ─────────────────────────────────────────────────────────────
 
-// ログイン済みセッションの復元処理（UBSアプリのonAuthStateChangedと同等の役割）
+// ログイン済みセッションの復元処理
 async function restoreSession(session){
   user = session?.user ?? null;
   if(user){
@@ -498,7 +498,6 @@ async function triggerAndroidInstall(){
 window.dismissPwaBanner=dismissPwaBanner;
 window.triggerAndroidInstall=triggerAndroidInstall;
 
-// FABボタン（PC/スマホ両対応: sticky wrapper で #root 内右下に固定）
 // FABボタン（画面最下部固定・#root右端に揃える）
 let _fabCleanup=null;
 function mkFab(onClick){
@@ -578,7 +577,6 @@ const S={
   tc:{background:"#fff",borderRadius:"14px",padding:"14px 14px 10px",marginBottom:"12px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",cursor:"pointer"},
   gc:{background:"#fff",borderRadius:"12px",padding:"12px 14px",marginBottom:"10px",display:"flex",alignItems:"flex-start",gap:"12px",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"},
   bdg:{width:"34px",height:"34px",borderRadius:"9px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",fontWeight:"900",flexShrink:"0"},
-  fab:{width:"56px",height:"56px",borderRadius:"50%",background:"#0f2744",color:"#fff",fontSize:"26px",border:"none",boxShadow:"0 4px 16px rgba(15,39,68,0.45)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:"100"},
   lbl:{fontSize:"13px",color:"#6b7280",fontWeight:"600",marginBottom:"5px",display:"block"},
   inp:{width:"100%",border:"1.5px solid #e5e7eb",borderRadius:"10px",padding:"12px 14px",fontSize:"16px",marginBottom:"12px",boxSizing:"border-box",color:"#1f2937",outline:"none",fontFamily:"inherit"},
   bp:{width:"100%",background:"#0f2744",color:"#fff",border:"none",borderRadius:"12px",padding:"15px",fontSize:"16px",fontWeight:"700",cursor:"pointer",fontFamily:"inherit",marginBottom:"0"},
