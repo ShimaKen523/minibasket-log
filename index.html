@@ -660,12 +660,14 @@ function mkEscortRows(body){
       },[d==="round"?"往復":"片道"]));
     });
     row.appendChild(dirRow);
-    // 削除ボタン（3名目以降のみ表示、グレー）
+    // 削除ボタン（3名目以降のみ表示、グレー）／1・2名目はスペーサーで幅を揃える
     if(i>=2){
       row.appendChild(el("button",{
         style:{flexShrink:"0",width:"32px",height:"32px",borderRadius:"8px",border:"1.5px solid #e5e7eb",background:"#f3f4f6",color:"#9ca3af",fontSize:"18px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"},
         onClick:()=>{tf.escorts.splice(i,1);render();}
       },["×"]));
+    } else {
+      row.appendChild(el("div",{style:{flexShrink:"0",width:"32px"}}));
     }
     body.appendChild(row);
   });
