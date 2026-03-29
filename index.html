@@ -90,7 +90,7 @@ let filterGr     = null;
 let filterGen    = null;
 let search       = "";
 let sel          = null;
-let tf = {name:"",grade:"U-12",gender:"男子",date:today(),venue:"",escorts:[{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"}]};
+let tf = {name:"",grade:"U-12",gender:"男子",date:today(),venue:"",escorts:[{name:"",dir:"round"},{name:"",dir:"round"}]};
 let gf = {opponent:"",ourScore:"",theirScore:"",memo:""};
 let te="", ge="";
 let editGameId = null;
@@ -333,7 +333,7 @@ async function addTournament(){
   if(escorts.length>0){
     await sb.from('escorts').insert(escorts.map(e=>({tournament_id:t.id,name:e.name,dir:e.dir})));
   }
-  tf={name:"",grade:"U-12",gender:"男子",date:today(),venue:"",escorts:[{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"}]};
+  tf={name:"",grade:"U-12",gender:"男子",date:today(),venue:"",escorts:[{name:"",dir:"round"},{name:"",dir:"round"}]};
   te=""; view="list"; await loadTournaments();
 }
 
@@ -660,9 +660,28 @@ function mkEscortRows(body){
       },[d==="round"?"往復":"片道"]));
     });
     row.appendChild(dirRow);
+    // 削除ボタン（2名を下回らない）
+    if(tf.escorts.length>2){
+      row.appendChild(el("button",{
+        style:{flexShrink:"0",width:"32px",height:"32px",borderRadius:"8px",border:"1.5px solid #fca5a5",background:"#fff",color:"#ef4444",fontSize:"18px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"},
+        onClick:()=>{tf.escorts.splice(i,1);render();}
+      },["×"]));
+    } else {
+      // スペーサーで幅を揃える
+      row.appendChild(el("div",{style:{flexShrink:"0",width:"32px"}}));
+    }
     body.appendChild(row);
   });
-  body.appendChild(el("div",{style:{fontSize:"12px",color:"#94a3b8",marginBottom:"16px"}},["往復＝1回、片道＝0.5回でカウント"]));
+  body.appendChild(el("div",{style:{fontSize:"12px",color:"#94a3b8",marginBottom:"10px"}},["往復＝1回、片道＝0.5回でカウント"]));
+  // 追加ボタン（上限5名）
+  if(tf.escorts.length<5){
+    body.appendChild(el("button",{
+      style:{width:"100%",background:"#f8fafc",color:"#0f2744",border:"1.5px dashed #cbd5e1",borderRadius:"10px",padding:"10px",fontSize:"14px",fontWeight:"600",cursor:"pointer",fontFamily:"inherit",marginBottom:"14px"},
+      onClick:()=>{tf.escorts.push({name:"",dir:"round"});render();}
+    },["＋ 引率者を追加"]));
+  } else {
+    body.appendChild(el("div",{style:{height:"14px"}}));
+  }
 }
 
 // ── Build ─────────────────────────────────────────────────────────────
@@ -935,7 +954,7 @@ function buildList(){
     });
   }
   wrap.appendChild(body);
-  if(isAdmin) wrap.appendChild(mkFab(()=>{tf={name:"",grade:"U-12",gender:"男子",date:today(),venue:"",escorts:[{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"},{name:"",dir:"round"}]};te="";view="at";render();}));
+  if(isAdmin) wrap.appendChild(mkFab(()=>{tf={name:"",grade:"U-12",gender:"男子",date:today(),venue:"",escorts:[{name:"",dir:"round"},{name:"",dir:"round"}]};te="";view="at";render();}));
   return wrap;
 }
 
@@ -962,7 +981,7 @@ function buildTD(){
       onClick:()=>{
         tf={
           name:t.name,grade:t.grade,gender:tGender,date:t.date,venue:t.venue||"",
-          escorts:[...(t.escorts||[]).map(e=>({name:e.name,dir:e.dir})),...Array.from({length:Math.max(0,5-(t.escorts||[]).length)},()=>({name:"",dir:"round"}))].slice(0,5)
+          escorts:(t.escorts||[]).map(e=>({name:e.name,dir:e.dir}))
         };
         view="et";render();
       }
