@@ -1003,7 +1003,7 @@ function buildTD(){
       const card=el("div",{style:{...S.gc,cursor:"pointer"},onClick:()=>{selGame=g;sf={};if(g.stats){g.stats.forEach(s=>{sf[s.player_id]={playTime:s.play_time??0,points:s.points??0,rebounds:s.rebounds??0};});}view="gd";render();}});
       card.appendChild(el("div",{style:{...S.bdg,background:rb.bg,color:rb.c}},[rb.t]));
       const info=el("div",{style:{flex:"1"}});
-      info.appendChild(el("div",{style:{fontWeight:"700",fontSize:"15px",color:"#1f2937"}},[`vs ${g.opponent}`]));
+      info.appendChild(el("div",{style:{fontWeight:"700",fontSize:"14px",color:"#1f2937"}},[`vs ${g.opponent}`]));
       if(g.memo) info.appendChild(el("div",{style:{fontSize:"12px",color:"#6b7280",marginTop:"3px",fontStyle:"italic"}},[`📝 ${g.memo}`]));
       card.appendChild(info);
       const right=el("div",{style:{textAlign:"right"}});
@@ -1376,17 +1376,17 @@ function buildPlayers(){
       });
       gradeKeys.forEach(gradeKey=>{
         // 学年ヘッダー
-        body.appendChild(el("div",{style:{fontSize:"13px",fontWeight:"700",color:"#6b7280",marginBottom:"8px",marginTop:"4px"}},[gradeKey==="卒"?"卒業生":`${gradeKey}年`]));
-        const section=el("div",{style:{background:"#fff",borderRadius:"14px",marginBottom:"16px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",overflow:"hidden"}});
+        body.appendChild(el("div",{style:{fontSize:"13px",fontWeight:"700",color:"#6b7280",marginBottom:"4px",marginTop:"2px"}},[gradeKey==="卒"?"卒業生":`${gradeKey}年`]));
+        const section=el("div",{style:{background:"#fff",borderRadius:"14px",marginBottom:"10px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",overflow:"hidden"}});
         groups[gradeKey].forEach((p,idx)=>{
           const isLast=idx===groups[gradeKey].length-1;
-          const row=el("div",{style:{display:"flex",alignItems:"center",gap:"10px",padding:"12px 14px",borderBottom:isLast?"none":"1px solid #f1f5f9"}});
+          const row=el("div",{style:{display:"flex",alignItems:"center",gap:"8px",padding:"7px 12px",borderBottom:isLast?"none":"1px solid #f1f5f9"}});
           // 部員番号
           row.appendChild(el("span",{style:{fontSize:"12px",color:"#b0b8c4",fontWeight:"600",flexShrink:"0",minWidth:"28px",textAlign:"right"}},[p.join_order!=null?`#${p.join_order}`:""]));
           // 名前・ふりがな
           const nameCol=el("div",{style:{flex:"1",minWidth:"0"}});
           nameCol.appendChild(el("div",{style:{fontWeight:"700",fontSize:"15px",color:"#1f2937"}},[p.name]));
-          if(p.furigana) nameCol.appendChild(el("div",{style:{fontSize:"11px",color:"#b0b8c4",marginTop:"1px"}},[p.furigana]));
+          if(p.furigana) nameCol.appendChild(el("div",{style:{fontSize:"10px",color:"#b0b8c4",marginTop:"0px"}},[p.furigana]));
           row.appendChild(nameCol);
           // 性別バッジ
           const isFemale=p.gender==="女子";
